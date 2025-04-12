@@ -39,3 +39,4 @@ export interface SimulationState {
 }
 
 export type Direction = 'north' | 'south' | 'east' | 'west';
+export type LightState = 'red' | 'yellow' | 'green';
