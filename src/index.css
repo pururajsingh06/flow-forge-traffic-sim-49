@@ -1,3 +1,4 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -35,19 +36,12 @@
     --radius: 0.5rem;
 
     --sidebar-background: 0 0% 98%;
-
     --sidebar-foreground: 240 5.3% 26.1%;
-
     --sidebar-primary: 240 5.9% 10%;
-
     --sidebar-primary-foreground: 0 0% 98%;
-
     --sidebar-accent: 240 4.8% 95.9%;
-
     --sidebar-accent-foreground: 240 5.9% 10%;
-
     --sidebar-border: 220 13% 91%;
-
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
 
@@ -98,4 +92,52 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Custom classes for the simulation */
+.dashed-line {
+  background-image: repeating-linear-gradient(
+    to right,
+    white,
+    white 10px,
+    transparent 10px,
+    transparent 20px
+  );
+}
+
+@keyframes car-movement {
+  from {
+    transform: translateX(0) translateY(0);
+  }
+  to {
+    transform: translateX(var(--move-x, 0px)) translateY(var(--move-y, 0px));
+  }
+}
+
+/* Traffic light flashing effect */
+@keyframes traffic-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.traffic-light {
+  box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+}
+
+.traffic-light.red {
+  animation: traffic-pulse 1s infinite;
+  background-color: #ff0000;
+}
+
+.traffic-light.yellow {
+  animation: traffic-pulse 0.5s infinite;
+  background-color: #ffcc00;
+}
+
+.traffic-light.green {
+  background-color: #00cc00;
 }

@@ -1,3 +1,4 @@
+
 import type { Config } from "tailwindcss";
 
 export default {
@@ -61,6 +62,21 @@ export default {
 					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
 					border: 'hsl(var(--sidebar-border))',
 					ring: 'hsl(var(--sidebar-ring))'
+				},
+				// Traffic simulation colors
+				road: '#333333',
+				roadMarking: '#FFFFFF',
+				grass: '#4CAF50',
+				traffic: {
+					red: '#F44336',
+					yellow: '#FFC107',
+					green: '#4CAF50'
+				},
+				vehicle: {
+					car1: '#2196F3',
+					car2: '#9C27B0',
+					car3: '#FF9800',
+					car4: '#E91E63'
 				}
 			},
 			borderRadius: {
@@ -84,11 +100,16 @@ export default {
 					to: {
 						height: '0'
 					}
+				},
+				'car-move': {
+					'0%': { transform: 'translateX(0) translateY(0)' },
+					'100%': { transform: 'translateX(var(--move-x, 0px)) translateY(var(--move-y, 0px))' }
 				}
 			},
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
-				'accordion-up': 'accordion-up 0.2s ease-out'
+				'accordion-up': 'accordion-up 0.2s ease-out',
+				'car-move': 'car-move var(--duration, 5s) linear forwards'
 			}
 		}
 	},
