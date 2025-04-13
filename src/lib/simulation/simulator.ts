@@ -1,4 +1,4 @@
-import { SimulationState, Vehicle, TrafficLight, Direction } from './types';
+import { SimulationState, Vehicle, TrafficLight, Direction, LightState } from './types';
 
 // Base controller interface
 export interface TrafficController {
@@ -394,7 +394,7 @@ export function createInitialState(): SimulationState {
       {
         id: 'light-east',
         position: { x: 335, y: 195 },
-        direction: 'green',
+        direction: 'east',
         state: 'green',
         timer: 0
       },
