@@ -20,6 +20,26 @@ import {
   Activity
 } from 'lucide-react';
 
+import { qLearningController, saveQTable, loadQTable } from './controllers/qlearning';
+
+let currentState: TrafficState = {
+  nsQueue: 0,
+  ewQueue: 0,
+  currentPhase: 'NS',
+  timeInPhase: 0
+};
+
+// Load pretrained Q-table (optional)
+loadQTable();
+
+// In your simulation loop:
+if (selectedController === 'q-learning') {
+  currentState = qLearningController(currentState);
+}
+
+// On exit or periodically:
+saveQTable();
+
 interface SimulationControlsProps {
   simulationState: SimulationState;
   isRunning: boolean;
