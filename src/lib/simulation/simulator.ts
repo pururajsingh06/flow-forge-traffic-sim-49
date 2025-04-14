@@ -471,20 +471,28 @@ function updateVehicles(state: SimulationState, deltaTime: number): SimulationSt
         // Stop at red light
         newVehicle.waitTime += adjustedDelta;
       } else {
-        // Move the vehicle
-        switch (newVehicle.direction) {
-          case 'north':
-            newVehicle.position.y -= newVehicle.speed * adjustedDelta;
-            break;
-          case 'south':
-            newVehicle.position.y += newVehicle.speed * adjustedDelta;
-            break;
-          case 'east':
-            newVehicle.position.x += newVehicle.speed * adjustedDelta;
-            break;
-          case 'west':
-            newVehicle.position.x -= newVehicle.speed * adjustedDelta;
-            break;
+        // Check for vehicles ahead
+        const shouldStop = isVehicleAhead(newVehicle, state.vehicles);
+        
+        if (shouldStop) {
+          // Vehicle ahead, stop and wait
+          newVehicle.waitTime += adjustedDelta;
+        } else {
+          // Move the vehicle
+          switch (newVehicle.direction) {
+            case 'north':
+              newVehicle.position.y -= newVehicle.speed * adjustedDelta;
+              break;
+            case 'south':
+              newVehicle.position.y += newVehicle.speed * adjustedDelta;
+              break;
+            case 'east':
+              newVehicle.position.x += newVehicle.speed * adjustedDelta;
+              break;
+            case 'west':
+              newVehicle.position.x -= newVehicle.speed * adjustedDelta;
+              break;
+          }
         }
       }
       
@@ -518,6 +526,59 @@ function isVehicleAtTrafficLight(vehicle: Vehicle, lights: TrafficLight[]): { at
   }
   
   return { atLight: false, lightState: 'green' };
+}
+
+function isVehicleAhead(vehicle: Vehicle, vehicles: Vehicle[]): boolean {
+  // Vehicle size (approximate)
+  const vehicleSize = vehicle.type === 'car' ? 20 : 30;
+  const safeDistance = vehicleSize + 5; // Add some buffer
+  
+  return vehicles.some(otherVehicle => {
+    // Skip self comparison
+    if (otherVehicle.id === vehicle.id) return false;
+    
+    // Only check vehicles in the same direction
+    if (otherVehicle.direction !== vehicle.direction) return false;
+    
+    // Calculate distance based on direction
+    let distance = 0;
+    switch (vehicle.direction) {
+      case 'north':
+        // Check if other vehicle is ahead (lower Y position)
+        if (otherVehicle.position.y >= vehicle.position.y) return false;
+        // Check if other vehicle is in the same lane (similar X position)
+        if (Math.abs(otherVehicle.position.x - vehicle.position.x) > 10) return false;
+        distance = vehicle.position.y - otherVehicle.position.y;
+        break;
+        
+      case 'south':
+        // Check if other vehicle is ahead (higher Y position)
+        if (otherVehicle.position.y <= vehicle.position.y) return false;
+        // Check if other vehicle is in the same lane
+        if (Math.abs(otherVehicle.position.x - vehicle.position.x) > 10) return false;
+        distance = otherVehicle.position.y - vehicle.position.y;
+        break;
+        
+      case 'east':
+        // Check if other vehicle is ahead (higher X position)
+        if (otherVehicle.position.x <= vehicle.position.x) return false;
+        // Check if other vehicle is in the same lane
+        if (Math.abs(otherVehicle.position.y - vehicle.position.y) > 10) return false;
+        distance = otherVehicle.position.x - vehicle.position.x;
+        break;
+        
+      case 'west':
+        // Check if other vehicle is ahead (lower X position)
+        if (otherVehicle.position.x >= vehicle.position.x) return false;
+        // Check if other vehicle is in the same lane
+        if (Math.abs(otherVehicle.position.y - vehicle.position.y) > 10) return false;
+        distance = vehicle.position.x - otherVehicle.position.x;
+        break;
+    }
+    
+    // Return true if vehicle is too close to the one ahead
+    return distance < safeDistance;
+  });
 }
 
 function spawnVehicles(state: SimulationState, deltaTime: number): SimulationState {

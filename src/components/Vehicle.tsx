@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Vehicle as VehicleType } from '@/lib/simulation/types';
-import { CarFront } from 'lucide-react';
+import { CarFront, Truck } from 'lucide-react';
 
 interface VehicleProps {
   vehicle: VehicleType;
@@ -39,7 +39,11 @@ const Vehicle: React.FC<VehicleProps> = ({ vehicle }) => {
         color: color
       }}
     >
-      <CarFront className="w-full h-full" />
+      {type === 'car' ? (
+        <CarFront className="w-full h-full" />
+      ) : (
+        <Truck className="w-full h-full" />
+      )}
     </div>
   );
 };
