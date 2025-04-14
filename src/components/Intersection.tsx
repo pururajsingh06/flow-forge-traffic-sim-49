@@ -42,11 +42,25 @@ interface TrafficLightProps {
 const TrafficLightComponent: React.FC<TrafficLightProps> = ({ light }) => {
   const { position, direction, state } = light;
   
-  // Position and size
-  const size = 16;
+  // Determine rotation based on direction
+  let rotation = 0;
+  switch (direction) {
+    case 'north':
+      rotation = 0;
+      break;
+    case 'east':
+      rotation = 90;
+      break;
+    case 'south':
+      rotation = 180;
+      break;
+    case 'west':
+      rotation = 270;
+      break;
+  }
   
   // Position adjustments based on direction
-  let className = "absolute flex items-center justify-center ";
+  let className = "absolute z-10 ";
   switch (direction) {
     case 'north':
       className += "bottom-1/2 right-1/2 mb-[50px] mr-[10px]";
@@ -63,14 +77,68 @@ const TrafficLightComponent: React.FC<TrafficLightProps> = ({ light }) => {
   }
   
   return (
-    <div className={className} style={{ width: size, height: size }}>
-      <div 
-        className={`w-full h-full rounded-full ${
-          state === 'red' ? 'bg-traffic-red' : 
-          state === 'yellow' ? 'bg-traffic-yellow' : 
-          'bg-traffic-green'
-        } shadow-lg`}
-      />
+    <div className={className} style={{ transform: `rotate(${rotation}deg)` }}>
+      <svg 
+        width="24" 
+        height="56" 
+        viewBox="0 0 24 56" 
+        fill="none" 
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        {/* Traffic Light Housing */}
+        <rect x="2" y="2" width="20" height="52" rx="4" fill="#333" stroke="#222" strokeWidth="2" />
+        
+        {/* Red Light */}
+        <circle 
+          cx="12" 
+          cy="12" 
+          r="7" 
+          fill={state === 'red' ? "#ff3b30" : "#5a0500"} 
+          filter={state === 'red' ? "url(#glow-red)" : "none"} 
+        />
+        
+        {/* Yellow Light */}
+        <circle 
+          cx="12" 
+          cy="28" 
+          r="7" 
+          fill={state === 'yellow' ? "#ffcc00" : "#5a4200"} 
+          filter={state === 'yellow' ? "url(#glow-yellow)" : "none"} 
+        />
+        
+        {/* Green Light */}
+        <circle 
+          cx="12" 
+          cy="44" 
+          r="7" 
+          fill={state === 'green' ? "#34c759" : "#0a3a17"} 
+          filter={state === 'green' ? "url(#glow-green)" : "none"} 
+        />
+        
+        {/* Glow Filters */}
+        <defs>
+          <filter id="glow-red" x="0" y="0" width="24" height="24" filterUnits="userSpaceOnUse">
+            <feFlood floodColor="#ff3b30" floodOpacity="0.8" result="flood" />
+            <feComposite in="flood" in2="SourceGraphic" operator="in" result="comp" />
+            <feGaussianBlur in="comp" stdDeviation="2" result="blur" />
+            <feComposite in="SourceGraphic" in2="blur" operator="over" />
+          </filter>
+          
+          <filter id="glow-yellow" x="0" y="16" width="24" height="24" filterUnits="userSpaceOnUse">
+            <feFlood floodColor="#ffcc00" floodOpacity="0.8" result="flood" />
+            <feComposite in="flood" in2="SourceGraphic" operator="in" result="comp" />
+            <feGaussianBlur in="comp" stdDeviation="2" result="blur" />
+            <feComposite in="SourceGraphic" in2="blur" operator="over" />
+          </filter>
+          
+          <filter id="glow-green" x="0" y="32" width="24" height="24" filterUnits="userSpaceOnUse">
+            <feFlood floodColor="#34c759" floodOpacity="0.8" result="flood" />
+            <feComposite in="flood" in2="SourceGraphic" operator="in" result="comp" />
+            <feGaussianBlur in="comp" stdDeviation="2" result="blur" />
+            <feComposite in="SourceGraphic" in2="blur" operator="over" />
+          </filter>
+        </defs>
+      </svg>
     </div>
   );
 };
