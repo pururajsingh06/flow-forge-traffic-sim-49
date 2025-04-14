@@ -30,44 +30,46 @@ const Vehicle: React.FC<VehicleProps> = ({ vehicle }) => {
   // Size based on vehicle type
   const size = type === 'car' ? 'w-6 h-6' : 'w-8 h-8';
   
-  // Get precise lane offset for accurate alignment
-  const getLaneOffset = () => {
-    switch (direction) {
-      case 'north':
-        return lane === 'left' ? -10 : 10;
-      case 'south':
-        return lane === 'left' ? -10 : 10;
-      case 'east':
-        return lane === 'left' ? 10 : -10;
-      case 'west':
-        return lane === 'left' ? 10 : -10;
-      default:
-        return 0;
-    }
-  };
-  
   // Apply lane-specific positioning adjustment
   const calculatePosition = () => {
-    const basePosition = {
+    // Start with the base position
+    const adjustedPosition = {
       x: position.x, 
       y: position.y
     };
     
-    // Center the vehicle on its position
+    // Adjust for vehicle size and center it
     const centerOffset = type === 'car' ? 3 : 4;
     
+    // Apply lane offset and direction-specific adjustments
     switch (direction) {
       case 'north':
+        // Center horizontally
+        adjustedPosition.x -= centerOffset;
+        // Adjust for lane (left or right of road)
+        adjustedPosition.x += (lane === 'left' ? -10 : 10);
+        break;
       case 'south':
-        basePosition.x -= centerOffset;
+        // Center horizontally
+        adjustedPosition.x -= centerOffset;
+        // Adjust for lane (left or right of road)
+        adjustedPosition.x += (lane === 'left' ? -10 : 10);
         break;
       case 'east':
+        // Center vertically
+        adjustedPosition.y -= centerOffset;
+        // Adjust for lane (left or right of road)
+        adjustedPosition.y += (lane === 'left' ? -10 : 10);
+        break;
       case 'west':
-        basePosition.y -= centerOffset;
+        // Center vertically
+        adjustedPosition.y -= centerOffset;
+        // Adjust for lane (left or right of road)
+        adjustedPosition.y += (lane === 'left' ? -10 : 10);
         break;
     }
     
-    return basePosition;
+    return adjustedPosition;
   };
   
   const calculatedPosition = calculatePosition();
