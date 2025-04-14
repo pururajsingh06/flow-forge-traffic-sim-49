@@ -36,7 +36,8 @@ const Vehicle: React.FC<VehicleProps> = ({ vehicle }) => {
       style={{ 
         left: `${position.x}px`, 
         top: `${position.y}px`,
-        color: color
+        color: color,
+        zIndex: Math.floor(position.y) // Add z-index based on position
       }}
     >
       {type === 'car' ? (

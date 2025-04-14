@@ -537,8 +537,9 @@ function isVehicleAhead(vehicle: Vehicle, vehicles: Vehicle[]): boolean {
     // Skip self comparison
     if (otherVehicle.id === vehicle.id) return false;
     
-    // Only check vehicles in the same direction
+    // Only check vehicles in the same direction and same lane
     if (otherVehicle.direction !== vehicle.direction) return false;
+    if (otherVehicle.lane !== vehicle.lane) return false;
     
     // Calculate distance based on direction
     let distance = 0;
@@ -546,32 +547,24 @@ function isVehicleAhead(vehicle: Vehicle, vehicles: Vehicle[]): boolean {
       case 'north':
         // Check if other vehicle is ahead (lower Y position)
         if (otherVehicle.position.y >= vehicle.position.y) return false;
-        // Check if other vehicle is in the same lane (similar X position)
-        if (Math.abs(otherVehicle.position.x - vehicle.position.x) > 10) return false;
         distance = vehicle.position.y - otherVehicle.position.y;
         break;
         
       case 'south':
         // Check if other vehicle is ahead (higher Y position)
         if (otherVehicle.position.y <= vehicle.position.y) return false;
-        // Check if other vehicle is in the same lane
-        if (Math.abs(otherVehicle.position.x - vehicle.position.x) > 10) return false;
         distance = otherVehicle.position.y - vehicle.position.y;
         break;
         
       case 'east':
         // Check if other vehicle is ahead (higher X position)
         if (otherVehicle.position.x <= vehicle.position.x) return false;
-        // Check if other vehicle is in the same lane
-        if (Math.abs(otherVehicle.position.y - vehicle.position.y) > 10) return false;
         distance = otherVehicle.position.x - vehicle.position.x;
         break;
         
       case 'west':
         // Check if other vehicle is ahead (lower X position)
         if (otherVehicle.position.x >= vehicle.position.x) return false;
-        // Check if other vehicle is in the same lane
-        if (Math.abs(otherVehicle.position.y - vehicle.position.y) > 10) return false;
         distance = vehicle.position.x - otherVehicle.position.x;
         break;
     }
@@ -595,20 +588,35 @@ function spawnVehicles(state: SimulationState, deltaTime: number): SimulationSta
   // Choose vehicle type (mostly cars, some trucks)
   const type = Math.random() > 0.8 ? 'truck' : 'car';
   
-  // Get spawn position based on direction
+  // Randomize lane (left or right lane)
+  const lane = Math.random() > 0.5 ? 'left' : 'right';
+  
+  // Get spawn position based on direction and lane
   let position;
   switch (direction) {
     case 'north':
-      position = { x: 310, y: 400 };
+      position = { 
+        x: lane === 'left' ? 290 : 310, 
+        y: 400 
+      };
       break;
     case 'south':
-      position = { x: 330, y: 0 };
+      position = { 
+        x: lane === 'left' ? 330 : 350, 
+        y: 0 
+      };
       break;
     case 'east':
-      position = { x: 0, y: 230 };
+      position = { 
+        x: 0, 
+        y: lane === 'left' ? 210 : 230
+      };
       break;
     case 'west':
-      position = { x: 600, y: 210 };
+      position = { 
+        x: 600, 
+        y: lane === 'left' ? 170 : 190
+      };
       break;
     default:
       position = { x: 0, y: 0 };
@@ -624,6 +632,7 @@ function spawnVehicles(state: SimulationState, deltaTime: number): SimulationSta
     type,
     position,
     direction,
+    lane,
     speed: type === 'car' ? 40 : 30,
     waitTime: 0,
     color

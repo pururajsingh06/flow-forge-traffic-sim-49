@@ -4,6 +4,7 @@ export interface Vehicle {
   type: 'car' | 'truck';
   position: { x: number; y: number };
   direction: 'north' | 'south' | 'east' | 'west';
+  lane: 'left' | 'right';
   speed: number;
   waitTime: number;
   color: string;
