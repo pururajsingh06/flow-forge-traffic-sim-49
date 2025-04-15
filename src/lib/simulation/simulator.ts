@@ -22,6 +22,10 @@ export class FixedTimingController implements TrafficController {
     const { greenDuration, yellowDuration } = state.config.aiParams;
     const totalCycleDuration = (greenDuration + yellowDuration) * 2;
     
+    // Calculate traffic density to provide feedback even though this controller doesn't use it
+    const trafficDensity = this.calculateTrafficDensity(state.vehicles);
+    newState.statistics.trafficDensity = trafficDensity;
+    
     newState.trafficLights = state.trafficLights.map(light => {
       const newLight = { ...light };
       newLight.timer += deltaTime;
@@ -54,85 +58,75 @@ export class FixedTimingController implements TrafficController {
     
     return newState;
   }
+  
+  // Calculate traffic density for each direction
+  private calculateTrafficDensity(vehicles: Vehicle[]): { north: number; south: number; east: number; west: number; } {
+    const density = { north: 0, south: 0, east: 0, west: 0 };
+    
+    vehicles.forEach(vehicle => {
+      density[vehicle.direction]++;
+    });
+    
+    return density;
+  }
 }
 
 // Adaptive controller (responds to traffic volume)
 export class AdaptiveController implements TrafficController {
-  private trafficHistory: { ns: number[], ew: number[] } = { ns: [], ew: [] };
+  private trafficHistory: { ns: {count: number, timestamp: number}[]; ew: {count: number, timestamp: number}[]; } = { 
+    ns: [], 
+    ew: [] 
+  };
   private maxHistoryLength = 10;
   private currentDirection: 'ns' | 'ew' = 'ns';
   private switchTimer = 0;
-  private minGreenTime = 3; // Reduced minimum green time for more responsiveness
   private lastSwitchTime = 0;
+  private currentPhase: 'green' | 'yellow' | 'red-transition' = 'green';
   
   getName(): string {
     return "Adaptive Timing";
   }
   
   getDescription(): string {
-    return "Intelligently adjusts light timing based on real-time traffic conditions.";
+    return "Intelligently adjusts light timing based on real-time traffic conditions and vehicle counts.";
   }
 
   update(state: SimulationState, deltaTime: number): SimulationState {
     const newState = { ...state };
     const { yellowDuration } = state.config.aiParams;
+    const minGreenTime = state.config.aiParams.adaptiveMinGreenTime || 3; // Default if not set
+    const maxWaitTime = state.config.aiParams.adaptiveMaxWaitTime || 20; // Default if not set
     
-    // Count vehicles in each direction
-    const vehiclesByDirection: Record<Direction, number> = {
-      north: 0,
-      south: 0,
-      east: 0,
-      west: 0
-    };
-    
-    // Count vehicles in each direction
-    state.vehicles.forEach(vehicle => {
-      vehiclesByDirection[vehicle.direction]++;
-    });
+    // Count vehicles in each direction with distance weighting
+    const trafficDensity = this.calculateWeightedTrafficDensity(state.vehicles);
+    newState.statistics.trafficDensity = trafficDensity;
     
     // Get totals by axis
-    const northSouthCount = vehiclesByDirection.north + vehiclesByDirection.south;
-    const eastWestCount = vehiclesByDirection.east + vehiclesByDirection.west;
+    const northSouthCount = trafficDensity.north + trafficDensity.south;
+    const eastWestCount = trafficDensity.east + trafficDensity.west;
     
-    // Add current counts to history
-    this.trafficHistory.ns.push(northSouthCount);
-    this.trafficHistory.ew.push(eastWestCount);
+    // Add current counts to history with timestamp
+    const currentTime = state.time;
+    this.trafficHistory.ns.push({ count: northSouthCount, timestamp: currentTime });
+    this.trafficHistory.ew.push({ count: eastWestCount, timestamp: currentTime });
     
-    // Keep history at max length
-    if (this.trafficHistory.ns.length > this.maxHistoryLength) {
-      this.trafficHistory.ns.shift();
-    }
-    if (this.trafficHistory.ew.length > this.maxHistoryLength) {
-      this.trafficHistory.ew.shift();
-    }
+    // Keep history at max length and remove old entries (older than 10 seconds)
+    this.trafficHistory.ns = this.trafficHistory.ns
+      .filter(entry => currentTime - entry.timestamp < 10)
+      .slice(-this.maxHistoryLength);
     
-    // Calculate average traffic over recent history (weighted toward most recent)
-    const recentWeight = 1.5; // Give more weight to recent counts
-    let weightedNS = 0;
-    let weightedEW = 0;
-    let totalWeight = 0;
+    this.trafficHistory.ew = this.trafficHistory.ew
+      .filter(entry => currentTime - entry.timestamp < 10)
+      .slice(-this.maxHistoryLength);
     
-    for (let i = 0; i < this.trafficHistory.ns.length; i++) {
-      const weight = i === this.trafficHistory.ns.length - 1 ? recentWeight : 1;
-      weightedNS += this.trafficHistory.ns[i] * weight;
-      weightedEW += this.trafficHistory.ew[i] * weight;
-      totalWeight += weight;
-    }
+    // Calculate weighted average traffic with recency and trend analysis
+    const { avgNS, avgEW, trendNS, trendEW } = this.calculateTrafficMetrics();
     
-    const avgNS = weightedNS / totalWeight;
-    const avgEW = weightedEW / totalWeight;
-    
-    // Update switch timer
+    // Update timers
     this.switchTimer += deltaTime;
     this.lastSwitchTime += deltaTime;
     
-    // Determine if we need to switch directions based on traffic count
-    // SIMPLIFIED LOGIC: Direct comparison of vehicle counts with a small buffer
-    // to prevent rapid switching
-    const nsGreaterThanEw = avgNS > (avgEW + 1); // Buffer of 1 vehicle
-    const ewGreaterThanNs = avgEW > (avgNS + 1); // Buffer of 1 vehicle
-    
-    // Determine current phase
+    // Determine current phase state
     const nsGreen = state.trafficLights.some(light => 
       ['north', 'south'].includes(light.direction) && light.state === 'green'
     );
@@ -143,22 +137,33 @@ export class AdaptiveController implements TrafficController {
     let shouldSwitchToNS = false;
     let shouldSwitchToEW = false;
     
-    // Logic for when to switch directions
-    if (nsGreen && ewGreaterThanNs && this.switchTimer >= this.minGreenTime) {
-      shouldSwitchToEW = true;
-    } else if (ewGreen && nsGreaterThanEw && this.switchTimer >= this.minGreenTime) {
-      shouldSwitchToNS = true;
+    // Advanced decision logic based on traffic counts, trends, and timing constraints
+    if (this.currentPhase === 'green') {
+      if (nsGreen) {
+        // If NS has green, check if should switch to EW
+        if ((eastWestCount > northSouthCount * 1.5 || trendEW > 0.5) && this.switchTimer >= minGreenTime) {
+          shouldSwitchToEW = true;
+          this.currentPhase = 'yellow';
+        }
+      } else if (ewGreen) {
+        // If EW has green, check if should switch to NS
+        if ((northSouthCount > eastWestCount * 1.5 || trendNS > 0.5) && this.switchTimer >= minGreenTime) {
+          shouldSwitchToNS = true;
+          this.currentPhase = 'yellow';
+        }
+      }
+      
+      // Force switch if one direction has had a very long wait and has traffic
+      if (ewGreen && this.lastSwitchTime > maxWaitTime && northSouthCount > 0) {
+        shouldSwitchToNS = true;
+        this.currentPhase = 'yellow';
+      } else if (nsGreen && this.lastSwitchTime > maxWaitTime && eastWestCount > 0) {
+        shouldSwitchToEW = true;
+        this.currentPhase = 'yellow';
+      }
     }
     
-    // Force switch if one direction has had a very long wait and has traffic
-    const maxWaitTime = 20; // Maximum time any direction should wait
-    if (ewGreen && this.lastSwitchTime > maxWaitTime && northSouthCount > 0) {
-      shouldSwitchToNS = true;
-    } else if (nsGreen && this.lastSwitchTime > maxWaitTime && eastWestCount > 0) {
-      shouldSwitchToEW = true;
-    }
-    
-    // Update traffic lights based on vehicle counts
+    // Update traffic lights based on vehicle counts and phase
     newState.trafficLights = state.trafficLights.map(light => {
       const newLight = { ...light };
       newLight.timer += deltaTime;
@@ -177,12 +182,16 @@ export class AdaptiveController implements TrafficController {
           // Switch from yellow to red
           newLight.state = 'red';
           newLight.timer = 0;
+          if (this.currentPhase === 'yellow') {
+            this.currentPhase = 'red-transition';
+          }
         } else if (shouldSwitchToNS && newLight.state === 'red') {
           // Switch from red to green
           newLight.state = 'green';
           newLight.timer = 0;
           this.lastSwitchTime = 0;
           this.switchTimer = 0;
+          this.currentPhase = 'green';
         }
       }
       
@@ -194,27 +203,60 @@ export class AdaptiveController implements TrafficController {
           newLight.timer = 0;
           this.switchTimer = 0;
         } else if (newLight.state === 'yellow' && newLight.timer >= yellowDuration) {
-          // Switch from red to green
+          // Switch from yellow to red
           newLight.state = 'red';
           newLight.timer = 0;
+          if (this.currentPhase === 'yellow') {
+            this.currentPhase = 'red-transition';
+          }
         } else if (shouldSwitchToEW && newLight.state === 'red') {
           // Switch from red to green
           newLight.state = 'green';
           newLight.timer = 0;
           this.lastSwitchTime = 0;
           this.switchTimer = 0;
+          this.currentPhase = 'green';
         }
       }
       
       return newLight;
     });
     
-    // Make sure there's always at least one direction with green lights
+    // Complete phase transition if all yellows have turned red
+    if (this.currentPhase === 'red-transition') {
+      const allYellowsComplete = newState.trafficLights.every(light => 
+        light.state !== 'yellow'
+      );
+      
+      if (allYellowsComplete) {
+        // Determine which direction should now get green based on traffic
+        const directionToGreen = northSouthCount >= eastWestCount ? 'ns' : 'ew';
+        
+        newState.trafficLights = newState.trafficLights.map(light => {
+          const isNorthSouth = ['north', 'south'].includes(light.direction);
+          const isEastWest = ['east', 'west'].includes(light.direction);
+          
+          if ((directionToGreen === 'ns' && isNorthSouth) || 
+              (directionToGreen === 'ew' && isEastWest)) {
+            return { ...light, state: 'green', timer: 0 };
+          }
+          return light;
+        });
+        
+        this.lastSwitchTime = 0;
+        this.switchTimer = 0;
+        this.currentDirection = directionToGreen;
+        this.currentPhase = 'green';
+      }
+    }
+    
+    // Ensure there's always at least one direction with green lights
     const anyGreen = newState.trafficLights.some(light => light.state === 'green');
     
-    if (!anyGreen) {
-      // If no lights are green, set the direction with more traffic to green
-      const directionToGreen = avgNS >= avgEW ? 'ns' : 'ew';
+    if (!anyGreen && this.currentPhase === 'green') {
+      // If no lights are green but we should be in green phase, 
+      // set the direction with more traffic to green
+      const directionToGreen = northSouthCount >= eastWestCount ? 'ns' : 'ew';
       
       newState.trafficLights = newState.trafficLights.map(light => {
         const isNorthSouth = ['north', 'south'].includes(light.direction);
@@ -234,6 +276,72 @@ export class AdaptiveController implements TrafficController {
     
     return newState;
   }
+  
+  // Calculate traffic density for each direction with distance weighting
+  private calculateWeightedTrafficDensity(vehicles: Vehicle[]): { north: number; south: number; east: number; west: number; } {
+    const density = { north: 0, south: 0, east: 0, west: 0 };
+    const intersectionCenter = { x: 300, y: 200 };
+    const maxDistance = 200; // Maximum distance to consider for weighting
+    
+    vehicles.forEach(vehicle => {
+      // Calculate distance to intersection
+      const dx = vehicle.position.x - intersectionCenter.x;
+      const dy = vehicle.position.y - intersectionCenter.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      // Weight calculation: closer vehicles get higher weight (1.0 to 0.2)
+      let weight = 1.0;
+      if (distance <= maxDistance) {
+        // Exponential decay formula: closer vehicles matter more
+        weight = 1.0 * Math.exp(-0.008 * distance);
+      } else {
+        weight = 0.2; // Minimum weight for very distant vehicles
+      }
+      
+      // Add weighted vehicle count
+      density[vehicle.direction] += weight;
+    });
+    
+    return density;
+  }
+  
+  // Calculate traffic metrics including averages and trends
+  private calculateTrafficMetrics() {
+    // Recent history has higher weight
+    const recentWeight = 1.5;
+    let weightedNS = 0;
+    let weightedEW = 0;
+    let totalWeight = 0;
+    
+    // Calculate weighted averages
+    for (let i = 0; i < this.trafficHistory.ns.length; i++) {
+      const weight = i === this.trafficHistory.ns.length - 1 ? recentWeight : 1;
+      weightedNS += this.trafficHistory.ns[i].count * weight;
+      weightedEW += this.trafficHistory.ew[i].count * weight;
+      totalWeight += weight;
+    }
+    
+    const avgNS = weightedNS / (totalWeight || 1); // Avoid division by zero
+    const avgEW = weightedEW / (totalWeight || 1);
+    
+    // Calculate trends (rate of change over time)
+    let trendNS = 0;
+    let trendEW = 0;
+    
+    if (this.trafficHistory.ns.length >= 3) {
+      const recent = this.trafficHistory.ns.slice(-3);
+      const oldAvg = (recent[0].count + recent[1].count) / 2;
+      const newAvg = recent[2].count;
+      trendNS = (newAvg - oldAvg) / (oldAvg || 1); // Normalized trend
+      
+      const recentEW = this.trafficHistory.ew.slice(-3);
+      const oldAvgEW = (recentEW[0].count + recentEW[1].count) / 2;
+      const newAvgEW = recentEW[2].count;
+      trendEW = (newAvgEW - oldAvgEW) / (oldAvgEW || 1); // Normalized trend
+    }
+    
+    return { avgNS, avgEW, trendNS, trendEW };
+  }
 }
 
 // Reinforcement Learning controller (learns optimal timing)
@@ -244,27 +352,23 @@ export class ReinforcementLearningController implements TrafficController {
   private learningRate = 0.1;
   private discountFactor = 0.9;
   private explorationRate = 0.2;
+  private qValues: Record<string, Record<string, number>> = {};
+  private stateHistory: {state: string, action: string, reward: number}[] = [];
+  private maxMemorySize = 100;
+  private batchUpdateSize = 10;
+  private updateCounter = 0;
   
   getName(): string {
     return "Reinforcement Learning";
   }
   
   getDescription(): string {
-    return "Uses Q-learning to optimize traffic flow based on historical patterns.";
+    return "Uses Q-learning to optimize traffic flow based on historical patterns and continuous adaptation.";
   }
   
   getCurrentState(state: SimulationState): string {
-    // Count vehicles in each direction
-    const vehiclesByDirection: Record<Direction, number> = {
-      north: 0, south: 0, east: 0, west: 0
-    };
-    
-    state.vehicles.forEach(vehicle => {
-      vehiclesByDirection[vehicle.direction]++;
-    });
-    
-    const nsCount = vehiclesByDirection.north + vehiclesByDirection.south;
-    const ewCount = vehiclesByDirection.east + vehiclesByDirection.west;
+    // Calculate weighted traffic density for more accurate state representation
+    const trafficDensity = this.calculateWeightedTrafficDensity(state.vehicles);
     
     // Get current light phase
     const nsGreen = state.trafficLights.some(light => 
@@ -275,57 +379,136 @@ export class ReinforcementLearningController implements TrafficController {
     const maxTime = state.trafficLights.reduce((max, light) => 
       Math.max(max, light.timer), 0);
     
-    // Discretize state
-    const highNS = nsCount > 3;
-    const highEW = ewCount > 3;
-    const longPhase = maxTime > 10;
+    // Discretize traffic levels for each direction (low, medium, high)
+    const nsLevel = this.discretizeTraffic(trafficDensity.north + trafficDensity.south);
+    const ewLevel = this.discretizeTraffic(trafficDensity.east + trafficDensity.west);
     
-    return `${highNS ? 'high' : 'low'}_ns_${highEW ? 'high' : 'low'}_ew_${nsGreen ? 'ns' : 'ew'}_${longPhase ? 'long' : 'short'}`;
+    // Discretize phase duration
+    const phaseDuration = this.discretizeTime(maxTime);
+    
+    // Current active phase
+    const currentPhase = nsGreen ? 'ns' : 'ew';
+    
+    // Create a state key that captures the current traffic situation
+    return `${nsLevel}_${ewLevel}_${currentPhase}_${phaseDuration}`;
   }
   
-  getAvailableActions(): string[] {
-    return ['extend_current', 'switch_phase'];
+  discretizeTraffic(count: number): string {
+    if (count < 1.5) return 'low';
+    if (count < 4) return 'medium';
+    return 'high';
   }
   
-  selectAction(stateKey: string, availableActions: string[]): string {
-    // Exploration vs exploitation
-    if (Math.random() < this.explorationRate) {
-      // Explore - random action
-      return availableActions[Math.floor(Math.random() * availableActions.length)];
+  discretizeTime(time: number): string {
+    if (time < 5) return 'short';
+    if (time < 15) return 'medium';
+    return 'long';
+  }
+  
+  getAvailableActions(state: SimulationState): string[] {
+    // More granular actions based on current state
+    const nsGreen = state.trafficLights.some(light => 
+      ['north', 'south'].includes(light.direction) && light.state === 'green'
+    );
+    
+    if (nsGreen) {
+      return ['maintain_ns', 'extend_ns', 'switch_to_ew'];
     } else {
-      // Exploit - would use Q-values from qlearning.ts but simplified here
-      if (stateKey.includes('high') && stateKey.includes('long')) {
-        return 'switch_phase'; // Switch if high traffic and been in phase for long
-      } else if (stateKey.includes('high') && stateKey.includes(stateKey.includes('ns') ? 'ns' : 'ew')) {
-        return 'extend_current'; // Extend if high traffic in current green direction
-      } else {
-        // Otherwise slightly favor switching
-        return Math.random() < 0.6 ? 'switch_phase' : 'extend_current';
+      return ['maintain_ew', 'extend_ew', 'switch_to_ns'];
+    }
+  }
+  
+  selectAction(stateKey: string, availableActions: string[], state: SimulationState): string {
+    // Initialize Q-values for this state if they don't exist
+    if (!this.qValues[stateKey]) {
+      this.qValues[stateKey] = {};
+      availableActions.forEach(action => {
+        this.qValues[stateKey][action] = 0;
+      });
+    }
+    
+    // Exploration vs exploitation with decaying exploration rate
+    // We reduce exploration rate as we learn more
+    const effectiveExplorationRate = Math.max(0.05, this.explorationRate * (1 - state.time / 500));
+    
+    if (Math.random() < effectiveExplorationRate) {
+      // Explore - random action with bias toward actions that make sense
+      const randomIndex = Math.floor(Math.random() * availableActions.length);
+      return availableActions[randomIndex];
+    } else {
+      // Exploit - choose action with highest Q-value
+      let bestAction = availableActions[0];
+      let bestValue = this.qValues[stateKey][bestAction] || 0;
+      
+      for (const action of availableActions) {
+        const qValue = this.qValues[stateKey][action] || 0;
+        if (qValue > bestValue) {
+          bestValue = qValue;
+          bestAction = action;
+        }
       }
+      
+      return bestAction;
     }
   }
   
   calculateReward(state: SimulationState): number {
-    // Reward is higher for lower wait times and higher throughput
+    // More sophisticated reward function
     const { averageWaitTime, throughput } = state.statistics;
-    return throughput - (averageWaitTime / 10);
+    
+    // Calculate vehicle density near intersection
+    const nearbyVehicles = state.vehicles.filter(v => {
+      const dx = v.position.x - 300; // Center x
+      const dy = v.position.y - 200; // Center y
+      const distanceSquared = dx * dx + dy * dy;
+      return distanceSquared < 10000; // Within 100px of intersection
+    }).length;
+    
+    // Reward is complex:
+    // 1. Higher throughput is good (+)
+    // 2. Lower wait times are good (+)
+    // 3. Fewer vehicles near intersection is good (+)
+    // 4. Long wait times are penalized more severely (-)
+    
+    return (throughput * 2) - (averageWaitTime * 0.8) - (nearbyVehicles * 0.5) - (Math.pow(averageWaitTime, 1.5) * 0.02);
   }
   
   applyAction(state: SimulationState, action: string): SimulationState {
     const newState = { ...state };
+    const { yellowDuration } = state.config.aiParams;
     
     // Determine current phase
     const nsGreen = state.trafficLights.some(light => 
       ['north', 'south'].includes(light.direction) && light.state === 'green'
     );
+    const ewGreen = state.trafficLights.some(light => 
+      ['east', 'west'].includes(light.direction) && light.state === 'green'
+    );
     
     // Apply the selected action
-    if (action === 'extend_current') {
+    if (action.includes('maintain')) {
       // Keep current phase, do nothing
-    } else if (action === 'switch_phase') {
-      // Switch phases - set appropriate traffic lights to yellow
+    } else if (action.includes('extend')) {
+      // Extend current phase - reset timers to give more green time
       newState.trafficLights = state.trafficLights.map(light => {
         if (light.state === 'green') {
+          // Reset timer to half its current value to extend but not fully restart
+          return { ...light, timer: Math.min(light.timer, 2) };
+        }
+        return { ...light };
+      });
+    } else if (action === 'switch_to_ew' && nsGreen) {
+      // Switch from NS to EW
+      newState.trafficLights = state.trafficLights.map(light => {
+        if (['north', 'south'].includes(light.direction) && light.state === 'green') {
+          return { ...light, state: 'yellow', timer: 0 };
+        }
+        return { ...light };
+      });
+    } else if (action === 'switch_to_ns' && ewGreen) {
+      // Switch from EW to NS
+      newState.trafficLights = state.trafficLights.map(light => {
+        if (['east', 'west'].includes(light.direction) && light.state === 'green') {
           return { ...light, state: 'yellow', timer: 0 };
         }
         return { ...light };
@@ -335,22 +518,83 @@ export class ReinforcementLearningController implements TrafficController {
     return newState;
   }
   
+  updateQValues(stateKey: string, action: string, reward: number, nextStateKey: string): void {
+    // Initialize if not existing
+    if (!this.qValues[stateKey]) {
+      this.qValues[stateKey] = {};
+    }
+    if (!this.qValues[stateKey][action]) {
+      this.qValues[stateKey][action] = 0;
+    }
+    
+    // Find maximum Q-value for next state
+    let maxNextQ = 0;
+    if (this.qValues[nextStateKey]) {
+      maxNextQ = Math.max(...Object.values(this.qValues[nextStateKey]));
+    }
+    
+    // Q-learning update formula
+    const oldValue = this.qValues[stateKey][action];
+    const newValue = oldValue + this.learningRate * (reward + this.discountFactor * maxNextQ - oldValue);
+    
+    this.qValues[stateKey][action] = newValue;
+  }
+  
   update(state: SimulationState, deltaTime: number): SimulationState {
     // Get current state representation
     const currentStateKey = this.getCurrentState(state);
     
     // Get available actions for the current state
-    const availableActions = this.getAvailableActions();
+    const availableActions = this.getAvailableActions(state);
     
-    // Select an action
-    const selectedAction = this.selectAction(currentStateKey, availableActions);
+    // Select an action using the policy (exploration vs exploitation)
+    const selectedAction = this.selectAction(currentStateKey, availableActions, state);
     
-    // Apply action
+    // Apply action to get the new state
     let newState = this.applyAction(state, selectedAction);
     
-    // Calculate reward
+    // Calculate traffic density for statistics
+    newState.statistics.trafficDensity = this.calculateWeightedTrafficDensity(state.vehicles);
+    
+    // Calculate reward for this state-action pair
     const reward = this.calculateReward(state);
     this.rewardHistory.push(reward);
+    
+    // Update Q-values if we have previous state-action
+    if (this.lastStateKey && this.lastAction) {
+      this.updateQValues(this.lastStateKey, this.lastAction, reward, currentStateKey);
+      
+      // Store transition in history for batch updates
+      this.stateHistory.push({
+        state: this.lastStateKey,
+        action: this.lastAction,
+        reward: reward
+      });
+      
+      // Keep history size limited
+      if (this.stateHistory.length > this.maxMemorySize) {
+        this.stateHistory.shift();
+      }
+    }
+    
+    // Periodically perform batch updates from history (experience replay)
+    this.updateCounter += 1;
+    if (this.updateCounter >= this.batchUpdateSize && this.stateHistory.length > 10) {
+      // Sample random transitions for experience replay
+      for (let i = 0; i < 5; i++) {
+        const randomIndex = Math.floor(Math.random() * this.stateHistory.length);
+        const experience = this.stateHistory[randomIndex];
+        
+        // Find a next state to use (ideally the one that followed this state)
+        let nextStateKey = currentStateKey; // Default to current if no better option
+        if (randomIndex < this.stateHistory.length - 1) {
+          nextStateKey = this.stateHistory[randomIndex + 1].state;
+        }
+        
+        this.updateQValues(experience.state, experience.action, experience.reward, nextStateKey);
+      }
+      this.updateCounter = 0;
+    }
     
     // Store state and action for next update
     this.lastStateKey = currentStateKey;
@@ -363,11 +607,8 @@ export class ReinforcementLearningController implements TrafficController {
       const newLight = { ...light };
       newLight.timer += deltaTime;
       
-      // Basic state transitions
-      if (newLight.state === 'green' && newLight.timer > greenDuration) {
-        newLight.state = 'yellow';
-        newLight.timer = 0;
-      } else if (newLight.state === 'yellow' && newLight.timer > yellowDuration) {
+      // Force yellow->red transition after yellowDuration
+      if (newLight.state === 'yellow' && newLight.timer > yellowDuration) {
         newLight.state = 'red';
         newLight.timer = 0;
       }
@@ -375,7 +616,7 @@ export class ReinforcementLearningController implements TrafficController {
       return newLight;
     });
     
-    // Ensure traffic light consistency - when one direction goes red, the other should go green
+    // Ensure traffic light consistency when one direction goes red
     const nsYellowToRed = newState.trafficLights.some(light => 
       ['north', 'south'].includes(light.direction) && 
       light.state === 'red' && 
@@ -388,8 +629,8 @@ export class ReinforcementLearningController implements TrafficController {
       light.timer === 0
     );
     
+    // When NS turns red, make EW green (and vice versa)
     if (nsYellowToRed) {
-      // NS just turned red, make EW green
       newState.trafficLights = newState.trafficLights.map(light => {
         if (['east', 'west'].includes(light.direction)) {
           return { ...light, state: 'green', timer: 0 };
@@ -399,7 +640,6 @@ export class ReinforcementLearningController implements TrafficController {
     }
     
     if (ewYellowToRed) {
-      // EW just turned red, make NS green
       newState.trafficLights = newState.trafficLights.map(light => {
         if (['north', 'south'].includes(light.direction)) {
           return { ...light, state: 'green', timer: 0 };
@@ -408,7 +648,56 @@ export class ReinforcementLearningController implements TrafficController {
       });
     }
     
+    // Safety check: ensure at least one direction has green
+    const anyGreen = newState.trafficLights.some(light => light.state === 'green');
+    
+    if (!anyGreen) {
+      // No direction has green - force green based on traffic density
+      const northSouthDensity = newState.statistics.trafficDensity?.north ?? 0 + newState.statistics.trafficDensity?.south ?? 0;
+      const eastWestDensity = newState.statistics.trafficDensity?.east ?? 0 + newState.statistics.trafficDensity?.west ?? 0;
+      
+      const directionToMakeGreen = northSouthDensity >= eastWestDensity ? 'ns' : 'ew';
+      
+      newState.trafficLights = newState.trafficLights.map(light => {
+        const isNorthSouth = ['north', 'south'].includes(light.direction);
+        const isEastWest = ['east', 'west'].includes(light.direction);
+        
+        if ((directionToMakeGreen === 'ns' && isNorthSouth) || 
+            (directionToMakeGreen === 'ew' && isEastWest)) {
+          return { ...light, state: 'green', timer: 0 };
+        }
+        return light;
+      });
+    }
+    
     return newState;
+  }
+  
+  // Calculate traffic density for each direction with distance weighting
+  private calculateWeightedTrafficDensity(vehicles: Vehicle[]): { north: number; south: number; east: number; west: number; } {
+    const density = { north: 0, south: 0, east: 0, west: 0 };
+    const intersectionCenter = { x: 300, y: 200 };
+    const maxDistance = 200; // Maximum distance to consider for weighting
+    
+    vehicles.forEach(vehicle => {
+      // Calculate distance to intersection
+      const dx = vehicle.position.x - intersectionCenter.x;
+      const dy = vehicle.position.y - intersectionCenter.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      // Weight calculation: closer vehicles get higher weight
+      let weight = 1.0;
+      if (distance <= maxDistance) {
+        weight = 1.0 * Math.exp(-0.008 * distance);
+      } else {
+        weight = 0.2; // Minimum weight for very distant vehicles
+      }
+      
+      // Add weighted vehicle count
+      density[vehicle.direction] += weight;
+    });
+    
+    return density;
   }
 }
 
@@ -449,7 +738,13 @@ export function createInitialState(): SimulationState {
     statistics: {
       totalVehicles: 0,
       averageWaitTime: 0,
-      throughput: 0
+      throughput: 0,
+      trafficDensity: {
+        north: 0,
+        south: 0,
+        east: 0,
+        west: 0
+      }
     },
     config: {
       spawnRate: 0.3,
@@ -458,7 +753,9 @@ export function createInitialState(): SimulationState {
       aiParams: {
         greenDuration: 20,
         yellowDuration: 5,
-        adaptiveThreshold: 1.5
+        adaptiveThreshold: 1.5,
+        adaptiveMinGreenTime: 3,
+        adaptiveMaxWaitTime: 20
       }
     }
   };
@@ -722,8 +1019,12 @@ function updateStatistics(state: SimulationState): SimulationState {
   }
   
   // Calculate throughput (vehicles passing through intersection)
-  // This is simplified - in reality would count vehicles completing their journey
-  newState.statistics.throughput = Math.floor(state.statistics.totalVehicles * 0.8 - newState.statistics.averageWaitTime * 0.1);
+  // Enhanced calculation that considers more factors
+  const throughputBase = Math.floor(state.statistics.totalVehicles * 0.8);
+  const waitTimePenalty = newState.statistics.averageWaitTime * 0.15;
+  const vehicleCountBonus = Math.min(10, state.vehicles.length * 0.5);
+  
+  newState.statistics.throughput = Math.max(0, throughputBase - waitTimePenalty + vehicleCountBonus);
   
   return newState;
 }

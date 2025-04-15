@@ -5,7 +5,7 @@ import { getControllerByType } from '@/lib/simulation/simulator';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Car, Clock, ArrowRightLeft, Brain } from 'lucide-react';
+import { Car, Clock, ArrowRightLeft, Brain, TrendingUp } from 'lucide-react';
 
 interface StatisticsProps {
   simulationState: SimulationState;
@@ -13,7 +13,7 @@ interface StatisticsProps {
 
 const Statistics: React.FC<StatisticsProps> = ({ simulationState }) => {
   const { statistics, config, time, vehicles } = simulationState;
-  const { totalVehicles, averageWaitTime, throughput } = statistics;
+  const { totalVehicles, averageWaitTime, throughput, trafficDensity } = statistics;
   
   const controller = getControllerByType(config.aiController);
   const formattedTime = formatTime(time);
@@ -24,6 +24,14 @@ const Statistics: React.FC<StatisticsProps> = ({ simulationState }) => {
       ? (throughput / (averageWaitTime + 1)) * 10 
       : 0
   ));
+  
+  // Calculate traffic density for display
+  const totalNorthSouth = (trafficDensity?.north || 0) + (trafficDensity?.south || 0);
+  const totalEastWest = (trafficDensity?.east || 0) + (trafficDensity?.west || 0);
+  const totalDensity = totalNorthSouth + totalEastWest;
+  
+  // Calculate percentage for visual display
+  const nsPercentage = totalDensity > 0 ? (totalNorthSouth / totalDensity) * 100 : 50;
   
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -69,6 +77,30 @@ const Statistics: React.FC<StatisticsProps> = ({ simulationState }) => {
               </div>
             </div>
           </div>
+          
+          {/* Traffic density visualization */}
+          {trafficDensity && (
+            <div className="mt-4">
+              <div className="flex justify-between mb-1">
+                <span className="text-xs">North-South Traffic</span>
+                <span className="text-xs">East-West Traffic</span>
+              </div>
+              <div className="h-2 w-full bg-gray-200 rounded overflow-hidden flex">
+                <div 
+                  className="bg-blue-500 h-full" 
+                  style={{ width: `${nsPercentage}%` }}
+                />
+                <div 
+                  className="bg-green-500 h-full" 
+                  style={{ width: `${100 - nsPercentage}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-xs mt-1">
+                <span>{totalNorthSouth.toFixed(1)}</span>
+                <span>{totalEastWest.toFixed(1)}</span>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
       
@@ -108,6 +140,37 @@ const Statistics: React.FC<StatisticsProps> = ({ simulationState }) => {
                 <p className="font-medium">{config.aiParams.yellowDuration}s</p>
               </div>
             </div>
+            
+            {/* Traffic priority indicator */}
+            {trafficDensity && (
+              <div className="mt-2">
+                <p className="text-sm font-medium flex items-center mb-1">
+                  <TrendingUp className="h-3 w-3 mr-1" /> Traffic Priority
+                </p>
+                <div className="flex flex-col gap-1">
+                  <div className="grid grid-cols-4 gap-1 text-xs">
+                    <div className="p-1 bg-blue-100 rounded text-center">North</div>
+                    <div className="p-1 bg-blue-100 rounded text-center">South</div>
+                    <div className="p-1 bg-green-100 rounded text-center">East</div>
+                    <div className="p-1 bg-green-100 rounded text-center">West</div>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1">
+                    <Progress value={trafficDensity.north ? (trafficDensity.north / (totalDensity || 1)) * 100 : 0} 
+                      className="h-1 bg-blue-100" 
+                      indicatorClassName="bg-blue-500" />
+                    <Progress value={trafficDensity.south ? (trafficDensity.south / (totalDensity || 1)) * 100 : 0} 
+                      className="h-1 bg-blue-100" 
+                      indicatorClassName="bg-blue-500" />
+                    <Progress value={trafficDensity.east ? (trafficDensity.east / (totalDensity || 1)) * 100 : 0} 
+                      className="h-1 bg-green-100" 
+                      indicatorClassName="bg-green-500" />
+                    <Progress value={trafficDensity.west ? (trafficDensity.west / (totalDensity || 1)) * 100 : 0} 
+                      className="h-1 bg-green-100" 
+                      indicatorClassName="bg-green-500" />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

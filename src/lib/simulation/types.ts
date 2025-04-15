@@ -26,6 +26,12 @@ export interface SimulationState {
     totalVehicles: number;
     averageWaitTime: number;
     throughput: number;
+    trafficDensity?: {
+      north: number;
+      south: number;
+      east: number;
+      west: number;
+    };
   };
   config: {
     spawnRate: number;
@@ -35,6 +41,8 @@ export interface SimulationState {
       greenDuration: number;
       yellowDuration: number;
       adaptiveThreshold: number;
+      adaptiveMinGreenTime?: number;
+      adaptiveMaxWaitTime?: number;
     };
   };
 }

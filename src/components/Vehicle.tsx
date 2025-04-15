@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Vehicle as VehicleType } from '@/lib/simulation/types';
 import { CarFront, Truck } from 'lucide-react';
@@ -61,6 +62,9 @@ const Vehicle: React.FC<VehicleProps> = ({ vehicle }) => {
   const left = position.x + offsetX;
   const top = position.y + offsetY;
 
+  // Add wait time indicator if the vehicle is waiting
+  const isWaiting = vehicle.waitTime > 0.5;
+
   return (
     <div
       className="absolute transition-transform duration-100 ease-linear"
@@ -78,6 +82,10 @@ const Vehicle: React.FC<VehicleProps> = ({ vehicle }) => {
         <CarFront className="w-full h-full" />
       ) : (
         <Truck className="w-full h-full" />
+      )}
+      
+      {isWaiting && (
+        <div className="absolute -top-2 -right-2 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
       )}
     </div>
   );
