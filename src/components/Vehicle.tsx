@@ -30,22 +30,21 @@ const Vehicle: React.FC<VehicleProps> = ({ vehicle }) => {
   const size = type === 'car' ? 16 : 24;
 
   // Define lane offsets based on direction to ensure vehicles stay on the road
-  // These values are adjusted to keep the vehicles aligned with the road
+  // These values are adjusted to keep the vehicles aligned with the road lanes
   let laneOffset = 0;
-  let roadCenter = { x: 300, y: 200 }; // Center of the intersection
   
   switch (direction) {
     case 'north':
-      laneOffset = lane === 'left' ? -20 : 0;
+      laneOffset = lane === 'left' ? -25 : -5; // Adjusted to center in lanes
       break;
     case 'south':
-      laneOffset = lane === 'left' ? 0 : 20;
+      laneOffset = lane === 'left' ? 5 : 25; // Adjusted to center in lanes
       break;
     case 'east':
-      laneOffset = lane === 'left' ? 0 : 20;
+      laneOffset = lane === 'left' ? -5 : 15; // Adjusted to center in lanes
       break;
     case 'west':
-      laneOffset = lane === 'left' ? -20 : 0;
+      laneOffset = lane === 'left' ? -15 : 5; // Adjusted to center in lanes
       break;
   }
 

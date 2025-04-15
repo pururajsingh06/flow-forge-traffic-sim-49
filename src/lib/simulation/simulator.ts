@@ -554,7 +554,34 @@ function isVehicleAtTrafficLight(vehicle: Vehicle, lights: TrafficLight[]): { at
   
   if (!light) return { atLight: false, lightState: 'green' };
   
-  // Check if vehicle is close to the intersection
+  // Define stop line positions based on direction
+  let atStopLine = false;
+  
+  switch (vehicle.direction) {
+    case 'north':
+      // Check if vehicle is at the bottom stop line
+      atStopLine = vehicle.position.y >= 260 && vehicle.position.y <= 270;
+      break;
+    case 'south':
+      // Check if vehicle is at the top stop line
+      atStopLine = vehicle.position.y >= 130 && vehicle.position.y <= 140;
+      break;
+    case 'east':
+      // Check if vehicle is at the left stop line
+      atStopLine = vehicle.position.x >= 230 && vehicle.position.x <= 240;
+      break;
+    case 'west':
+      // Check if vehicle is at the right stop line
+      atStopLine = vehicle.position.x >= 360 && vehicle.position.x <= 370;
+      break;
+  }
+  
+  // If at stop line, check light state
+  if (atStopLine) {
+    return { atLight: true, lightState: light.state };
+  }
+  
+  // Also check if vehicle is approaching intersection (keep the original check as fallback)
   const isAtIntersection = (
     Math.abs(vehicle.position.x - 300) < 50 &&
     Math.abs(vehicle.position.y - 200) < 50
