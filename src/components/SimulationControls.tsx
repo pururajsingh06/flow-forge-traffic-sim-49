@@ -20,9 +20,10 @@ import {
   Activity
 } from 'lucide-react';
 
-import { qLearningController, saveQTable, loadQTable } from './controllers/qlearning';
+import { qLearningController, saveQTable, loadQTable, TrafficState } from './controllers/qlearning';
 
-let currentState: TrafficState = {
+// Initialize the current traffic state
+const initialTrafficState: TrafficState = {
   nsQueue: 0,
   ewQueue: 0,
   currentPhase: 'NS',
@@ -31,14 +32,6 @@ let currentState: TrafficState = {
 
 // Load pretrained Q-table (optional)
 loadQTable();
-
-// In your simulation loop:
-if (selectedController === 'q-learning') {
-  currentState = qLearningController(currentState);
-}
-
-// On exit or periodically:
-saveQTable();
 
 interface SimulationControlsProps {
   simulationState: SimulationState;
@@ -62,6 +55,26 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   onParamChange
 }) => {
   const { config } = simulationState;
+  
+  // Handle Q-learning controller updates when needed
+  React.useEffect(() => {
+    let currentTrafficState = initialTrafficState;
+    
+    if (config.aiController === 'reinforcement') {
+      // Update traffic state with Q-learning
+      currentTrafficState = qLearningController(currentTrafficState);
+      
+      // Save the Q-table periodically
+      const saveInterval = setInterval(() => {
+        saveQTable();
+      }, 30000); // Save every 30 seconds
+      
+      return () => {
+        clearInterval(saveInterval);
+        saveQTable(); // Save when unmounting
+      };
+    }
+  }, [config.aiController]);
   
   return (
     <div className="bg-card p-4 rounded-lg shadow-md">
