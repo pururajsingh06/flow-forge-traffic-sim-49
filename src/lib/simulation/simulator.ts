@@ -63,6 +63,7 @@ export class AdaptiveController implements TrafficController {
   private currentDirection: 'ns' | 'ew' = 'ns';
   private switchTimer = 0;
   private minGreenTime = 5; // Minimum green time in seconds
+  private lastSwitchTime = 0; // Track when we last switched directions
   
   getName(): string {
     return "Adaptive Timing";
@@ -84,7 +85,7 @@ export class AdaptiveController implements TrafficController {
       west: 0
     };
     
-    // Count vehicles in each direction and track their distance from intersection
+    // Track vehicles in each direction and their distance from intersection
     const vehiclesApproaching: Record<'ns' | 'ew', { count: number, avgDistance: number }> = {
       ns: { count: 0, avgDistance: 0 },
       ew: { count: 0, avgDistance: 0 }
@@ -150,32 +151,56 @@ export class AdaptiveController implements TrafficController {
     const avgNS = this.trafficHistory.ns.reduce((sum, count) => sum + count, 0) / this.trafficHistory.ns.length;
     const avgEW = this.trafficHistory.ew.reduce((sum, count) => sum + count, 0) / this.trafficHistory.ew.length;
     
-    // Determine traffic demand ratio (how much more traffic in one direction vs the other)
-    const trafficRatio = avgNS > 0 && avgEW > 0 
-      ? Math.max(avgNS / avgEW, avgEW / avgNS) 
-      : 1;
-    
-    // Higher ratio means more traffic imbalance, so adjust the threshold accordingly
-    const dynamicThreshold = Math.min(adaptiveThreshold * trafficRatio, 3.0);
-    
-    // Determine which direction has more immediate traffic
-    const moreTrafficInNorthSouth = 
-      vehiclesApproaching.ns.count > vehiclesApproaching.ew.count * dynamicThreshold ||
-      (vehiclesApproaching.ns.count > 0 && vehiclesApproaching.ew.count === 0);
-      
-    const moreTrafficInEastWest = 
-      vehiclesApproaching.ew.count > vehiclesApproaching.ns.count * dynamicThreshold ||
-      (vehiclesApproaching.ew.count > 0 && vehiclesApproaching.ns.count === 0);
-    
     // Update switch timer
     this.switchTimer += deltaTime;
+    this.lastSwitchTime += deltaTime;
+    
+    // IMPROVED LOGIC: More heavily weight current vehicle counts rather than just averages
+    // This ensures we respond better to sudden influxes of vehicles
+    
+    // Calculate the congestion ratio between directions
+    let nsToEwRatio = 1;
+    if (vehiclesApproaching.ew.count > 0) {
+      nsToEwRatio = vehiclesApproaching.ns.count / vehiclesApproaching.ew.count;
+    } else if (vehiclesApproaching.ns.count > 0) {
+      nsToEwRatio = 5; // Strongly favor NS if there are no EW vehicles
+    }
+    
+    let ewToNsRatio = 1;
+    if (vehiclesApproaching.ns.count > 0) {
+      ewToNsRatio = vehiclesApproaching.ew.count / vehiclesApproaching.ns.count;
+    } else if (vehiclesApproaching.ew.count > 0) {
+      ewToNsRatio = 5; // Strongly favor EW if there are no NS vehicles
+    }
+    
+    // Determine which direction has more traffic right now
+    const moreTrafficInNorthSouth = nsToEwRatio > adaptiveThreshold;
+    const moreTrafficInEastWest = ewToNsRatio > adaptiveThreshold;
+    
+    // Determine if traffic is building up significantly in the non-green direction
+    const isTrafficBuildingUp = 
+      (this.currentDirection === 'ns' && vehiclesApproaching.ew.count > 3 && this.lastSwitchTime > 15) ||
+      (this.currentDirection === 'ew' && vehiclesApproaching.ns.count > 3 && this.lastSwitchTime > 15);
     
     // Check if we need to switch direction based on traffic conditions
     if ((this.currentDirection === 'ns' && moreTrafficInEastWest && this.switchTimer >= this.minGreenTime) ||
-        (this.currentDirection === 'ew' && moreTrafficInNorthSouth && this.switchTimer >= this.minGreenTime)) {
+        (this.currentDirection === 'ew' && moreTrafficInNorthSouth && this.switchTimer >= this.minGreenTime) ||
+        isTrafficBuildingUp) {
       // Switch direction
       this.currentDirection = this.currentDirection === 'ns' ? 'ew' : 'ns';
       this.switchTimer = 0;
+      this.lastSwitchTime = 0;
+    }
+    
+    // Calculate dynamic green duration based on traffic volume
+    let dynamicGreenDuration = greenDuration;
+    
+    if (this.currentDirection === 'ns' && vehiclesApproaching.ns.count > 0) {
+      // Scale green duration by the ratio of vehicles + a base time
+      // Higher vehicle counts = longer green durations
+      dynamicGreenDuration = Math.min(60, greenDuration * Math.max(1, 0.5 + (vehiclesApproaching.ns.count / 5)));
+    } else if (this.currentDirection === 'ew' && vehiclesApproaching.ew.count > 0) {
+      dynamicGreenDuration = Math.min(60, greenDuration * Math.max(1, 0.5 + (vehiclesApproaching.ew.count / 5)));
     }
     
     // Update traffic lights based on current direction and traffic conditions
@@ -190,17 +215,6 @@ export class AdaptiveController implements TrafficController {
       const shouldBeGreen = 
         (this.currentDirection === 'ns' && isNorthSouth) ||
         (this.currentDirection === 'ew' && isEastWest);
-      
-      // Calculate dynamic green duration based on traffic volume
-      let dynamicGreenDuration = greenDuration;
-      if (shouldBeGreen) {
-        if (this.currentDirection === 'ns' && moreTrafficInNorthSouth) {
-          // Extend green time proportionally to traffic ratio, up to 2x
-          dynamicGreenDuration = greenDuration * Math.min(1.5, trafficRatio);
-        } else if (this.currentDirection === 'ew' && moreTrafficInEastWest) {
-          dynamicGreenDuration = greenDuration * Math.min(1.5, trafficRatio);
-        }
-      }
       
       // State machine for light transitions
       if (shouldBeGreen) {

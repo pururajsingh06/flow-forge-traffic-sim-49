@@ -138,26 +138,26 @@ const TrafficLightComponent: React.FC<TrafficLightProps> = ({ light }) => {
           filter={state === 'green' ? "url(#glow-green)" : "none"} 
         />
         
-        {/* Glow Filters */}
+        {/* Enhanced Glow Filters with stronger intensity */}
         <defs>
           <filter id="glow-red" x="0" y="0" width="24" height="24" filterUnits="userSpaceOnUse">
             <feFlood floodColor="#ff3b30" floodOpacity="0.8" result="flood" />
             <feComposite in="flood" in2="SourceGraphic" operator="in" result="comp" />
-            <feGaussianBlur in="comp" stdDeviation="2" result="blur" />
+            <feGaussianBlur in="comp" stdDeviation="3" result="blur" />
             <feComposite in="SourceGraphic" in2="blur" operator="over" />
           </filter>
           
           <filter id="glow-yellow" x="0" y="16" width="24" height="24" filterUnits="userSpaceOnUse">
             <feFlood floodColor="#ffcc00" floodOpacity="0.8" result="flood" />
             <feComposite in="flood" in2="SourceGraphic" operator="in" result="comp" />
-            <feGaussianBlur in="comp" stdDeviation="2" result="blur" />
+            <feGaussianBlur in="comp" stdDeviation="3" result="blur" />
             <feComposite in="SourceGraphic" in2="blur" operator="over" />
           </filter>
           
           <filter id="glow-green" x="0" y="32" width="24" height="24" filterUnits="userSpaceOnUse">
-            <feFlood floodColor="#34c759" floodOpacity="0.8" result="flood" />
+            <feFlood floodColor="#34c759" floodOpacity="1.0" result="flood" />
             <feComposite in="flood" in2="SourceGraphic" operator="in" result="comp" />
-            <feGaussianBlur in="comp" stdDeviation="2" result="blur" />
+            <feGaussianBlur in="comp" stdDeviation="4" result="blur" />
             <feComposite in="SourceGraphic" in2="blur" operator="over" />
           </filter>
         </defs>
