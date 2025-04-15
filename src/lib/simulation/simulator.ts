@@ -234,23 +234,11 @@ export class AdaptiveController implements TrafficController {
 // Reinforcement Learning controller (learns optimal timing)
 export class ReinforcementLearningController implements TrafficController {
   private rewardHistory: number[] = [];
-  private qTable: Record<string, Record<string, number>> = {};
+  private lastStateKey: string = '';
+  private lastAction: string = '';
   private learningRate = 0.1;
   private discountFactor = 0.9;
   private explorationRate = 0.2;
-  
-  constructor() {
-    // Initialize Q-table with some states and actions
-    const states = ['low_ns_low_ew', 'low_ns_high_ew', 'high_ns_low_ew', 'high_ns_high_ew'];
-    const actions = ['extend_ns', 'extend_ew', 'switch_to_ns', 'switch_to_ew'];
-    
-    states.forEach(state => {
-      this.qTable[state] = {};
-      actions.forEach(action => {
-        this.qTable[state][action] = 0;
-      });
-    });
-  }
   
   getName(): string {
     return "Reinforcement Learning";
@@ -261,7 +249,7 @@ export class ReinforcementLearningController implements TrafficController {
   }
   
   getCurrentState(state: SimulationState): string {
-    // Determine current traffic density
+    // Count vehicles in each direction
     const vehiclesByDirection: Record<Direction, number> = {
       north: 0, south: 0, east: 0, west: 0
     };
@@ -273,32 +261,25 @@ export class ReinforcementLearningController implements TrafficController {
     const nsCount = vehiclesByDirection.north + vehiclesByDirection.south;
     const ewCount = vehiclesByDirection.east + vehiclesByDirection.west;
     
-    const highNS = nsCount > 3;
-    const highEW = ewCount > 3;
-    
-    if (highNS && highEW) return 'high_ns_high_ew';
-    if (highNS && !highEW) return 'high_ns_low_ew';
-    if (!highNS && highEW) return 'low_ns_high_ew';
-    return 'low_ns_low_ew';
-  }
-  
-  getAvailableActions(state: SimulationState): string[] {
+    // Get current light phase
     const nsGreen = state.trafficLights.some(light => 
       ['north', 'south'].includes(light.direction) && light.state === 'green'
     );
     
-    const ewGreen = state.trafficLights.some(light => 
-      ['east', 'west'].includes(light.direction) && light.state === 'green'
-    );
+    // Calculate time in current phase
+    const maxTime = state.trafficLights.reduce((max, light) => 
+      Math.max(max, light.timer), 0);
     
-    if (nsGreen) {
-      return ['extend_ns', 'switch_to_ew'];
-    } else if (ewGreen) {
-      return ['extend_ew', 'switch_to_ns'];
-    } else {
-      // In yellow or transition state
-      return ['switch_to_ns', 'switch_to_ew'];
-    }
+    // Discretize state
+    const highNS = nsCount > 3;
+    const highEW = ewCount > 3;
+    const longPhase = maxTime > 10;
+    
+    return `${highNS ? 'high' : 'low'}_ns_${highEW ? 'high' : 'low'}_ew_${nsGreen ? 'ns' : 'ew'}_${longPhase ? 'long' : 'short'}`;
+  }
+  
+  getAvailableActions(): string[] {
+    return ['extend_current', 'switch_phase'];
   }
   
   selectAction(stateKey: string, availableActions: string[]): string {
@@ -307,19 +288,15 @@ export class ReinforcementLearningController implements TrafficController {
       // Explore - random action
       return availableActions[Math.floor(Math.random() * availableActions.length)];
     } else {
-      // Exploit - best known action
-      let bestAction = availableActions[0];
-      let bestValue = this.qTable[stateKey][bestAction] || 0;
-      
-      availableActions.forEach(action => {
-        const actionValue = this.qTable[stateKey][action] || 0;
-        if (actionValue > bestValue) {
-          bestValue = actionValue;
-          bestAction = action;
-        }
-      });
-      
-      return bestAction;
+      // Exploit - would use Q-values from qlearning.ts but simplified here
+      if (stateKey.includes('high') && stateKey.includes('long')) {
+        return 'switch_phase'; // Switch if high traffic and been in phase for long
+      } else if (stateKey.includes('high') && stateKey.includes(stateKey.includes('ns') ? 'ns' : 'ew')) {
+        return 'extend_current'; // Extend if high traffic in current green direction
+      } else {
+        // Otherwise slightly favor switching
+        return Math.random() < 0.6 ? 'switch_phase' : 'extend_current';
+      }
     }
   }
   
@@ -332,47 +309,22 @@ export class ReinforcementLearningController implements TrafficController {
   applyAction(state: SimulationState, action: string): SimulationState {
     const newState = { ...state };
     
+    // Determine current phase
+    const nsGreen = state.trafficLights.some(light => 
+      ['north', 'south'].includes(light.direction) && light.state === 'green'
+    );
+    
     // Apply the selected action
-    switch (action) {
-      case 'extend_ns':
-        newState.trafficLights = state.trafficLights.map(light => {
-          if (['north', 'south'].includes(light.direction) && light.state === 'green') {
-            // Extend green for north-south
-            return { ...light, timer: Math.max(0, light.timer - 2) };
-          }
-          return { ...light };
-        });
-        break;
-        
-      case 'extend_ew':
-        newState.trafficLights = state.trafficLights.map(light => {
-          if (['east', 'west'].includes(light.direction) && light.state === 'green') {
-            // Extend green for east-west
-            return { ...light, timer: Math.max(0, light.timer - 2) };
-          }
-          return { ...light };
-        });
-        break;
-        
-      case 'switch_to_ns':
-        newState.trafficLights = state.trafficLights.map(light => {
-          if (['north', 'south'].includes(light.direction)) {
-            return { ...light, state: 'green', timer: 0 };
-          } else {
-            return { ...light, state: 'red', timer: 0 };
-          }
-        });
-        break;
-        
-      case 'switch_to_ew':
-        newState.trafficLights = state.trafficLights.map(light => {
-          if (['east', 'west'].includes(light.direction)) {
-            return { ...light, state: 'green', timer: 0 };
-          } else {
-            return { ...light, state: 'red', timer: 0 };
-          }
-        });
-        break;
+    if (action === 'extend_current') {
+      // Keep current phase, do nothing
+    } else if (action === 'switch_phase') {
+      // Switch phases - set appropriate traffic lights to yellow
+      newState.trafficLights = state.trafficLights.map(light => {
+        if (light.state === 'green') {
+          return { ...light, state: 'yellow', timer: 0 };
+        }
+        return { ...light };
+      });
     }
     
     return newState;
@@ -383,7 +335,7 @@ export class ReinforcementLearningController implements TrafficController {
     const currentStateKey = this.getCurrentState(state);
     
     // Get available actions for the current state
-    const availableActions = this.getAvailableActions(state);
+    const availableActions = this.getAvailableActions();
     
     // Select an action
     const selectedAction = this.selectAction(currentStateKey, availableActions);
@@ -395,27 +347,11 @@ export class ReinforcementLearningController implements TrafficController {
     const reward = this.calculateReward(state);
     this.rewardHistory.push(reward);
     
-    // Update Q-table (Q-learning update)
-    if (this.rewardHistory.length > 1) {
-      // Get previous state and action (simplified for demonstration)
-      const prevStateKey = currentStateKey; // In real implementation, you'd store previous state
-      const prevAction = selectedAction; // In real implementation, you'd store previous action
-      
-      // Calculate maximum Q value for new state
-      const maxQNewState = Math.max(
-        ...availableActions.map(action => this.qTable[currentStateKey][action] || 0)
-      );
-      
-      // Update Q-value
-      if (!this.qTable[prevStateKey]) this.qTable[prevStateKey] = {};
-      if (!this.qTable[prevStateKey][prevAction]) this.qTable[prevStateKey][prevAction] = 0;
-      
-      this.qTable[prevStateKey][prevAction] += this.learningRate * (
-        reward + this.discountFactor * maxQNewState - this.qTable[prevStateKey][prevAction]
-      );
-    }
+    // Store state and action for next update
+    this.lastStateKey = currentStateKey;
+    this.lastAction = selectedAction;
     
-    // Apply some timing logic as a fallback
+    // Apply basic timing rules for light transitions
     const { greenDuration, yellowDuration } = state.config.aiParams;
     
     newState.trafficLights = newState.trafficLights.map(light => {
@@ -433,6 +369,39 @@ export class ReinforcementLearningController implements TrafficController {
       
       return newLight;
     });
+    
+    // Ensure traffic light consistency - when one direction goes red, the other should go green
+    const nsYellowToRed = newState.trafficLights.some(light => 
+      ['north', 'south'].includes(light.direction) && 
+      light.state === 'red' && 
+      light.timer === 0
+    );
+    
+    const ewYellowToRed = newState.trafficLights.some(light => 
+      ['east', 'west'].includes(light.direction) && 
+      light.state === 'red' && 
+      light.timer === 0
+    );
+    
+    if (nsYellowToRed) {
+      // NS just turned red, make EW green
+      newState.trafficLights = newState.trafficLights.map(light => {
+        if (['east', 'west'].includes(light.direction)) {
+          return { ...light, state: 'green', timer: 0 };
+        }
+        return light;
+      });
+    }
+    
+    if (ewYellowToRed) {
+      // EW just turned red, make NS green
+      newState.trafficLights = newState.trafficLights.map(light => {
+        if (['north', 'south'].includes(light.direction)) {
+          return { ...light, state: 'green', timer: 0 };
+        }
+        return light;
+      });
+    }
     
     return newState;
   }

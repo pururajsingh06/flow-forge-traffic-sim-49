@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { SimulationState } from '@/lib/simulation/types';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -20,18 +20,12 @@ import {
   Activity
 } from 'lucide-react';
 
-import { qLearningController, saveQTable, loadQTable, TrafficState } from './controllers/qlearning';
-
-// Initialize the current traffic state
-const initialTrafficState: TrafficState = {
-  nsQueue: 0,
-  ewQueue: 0,
-  currentPhase: 'NS',
-  timeInPhase: 0
-};
-
-// Load pretrained Q-table (optional)
-loadQTable();
+import { 
+  qLearningController, 
+  saveQTable, 
+  loadQTable, 
+  TrafficState 
+} from './controllers/qlearning';
 
 interface SimulationControlsProps {
   simulationState: SimulationState;
@@ -55,26 +49,61 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   onParamChange
 }) => {
   const { config } = simulationState;
+  const qLearningStateRef = useRef<TrafficState>({
+    nsQueue: 0,
+    ewQueue: 0,
+    currentPhase: 'NS',
+    timeInPhase: 0
+  });
   
-  // Handle Q-learning controller updates when needed
-  React.useEffect(() => {
-    let currentTrafficState = initialTrafficState;
+  // Load Q-table when component mounts
+  useEffect(() => {
+    loadQTable();
     
-    if (config.aiController === 'reinforcement') {
-      // Update traffic state with Q-learning
-      currentTrafficState = qLearningController(currentTrafficState);
+    // Save Q-table when component unmounts
+    return () => {
+      saveQTable();
+    };
+  }, []);
+  
+  // Update Q-learning state based on actual simulation
+  useEffect(() => {
+    if (config.aiController === 'reinforcement' && isRunning) {
+      // Count vehicles in each direction
+      const nsVehicles = simulationState.vehicles.filter(
+        v => v.direction === 'north' || v.direction === 'south'
+      ).length;
       
-      // Save the Q-table periodically
-      const saveInterval = setInterval(() => {
-        saveQTable();
-      }, 30000); // Save every 30 seconds
+      const ewVehicles = simulationState.vehicles.filter(
+        v => v.direction === 'east' || v.direction === 'west'
+      ).length;
       
-      return () => {
-        clearInterval(saveInterval);
-        saveQTable(); // Save when unmounting
+      // Determine current phase from traffic lights
+      const nsGreen = simulationState.trafficLights.some(
+        light => (light.direction === 'north' || light.direction === 'south') && light.state === 'green'
+      );
+      
+      // Update our internal state for Q-learning
+      qLearningStateRef.current = {
+        nsQueue: nsVehicles,
+        ewQueue: ewVehicles,
+        currentPhase: nsGreen ? 'NS' : 'EW',
+        timeInPhase: qLearningStateRef.current.currentPhase === (nsGreen ? 'NS' : 'EW') 
+          ? qLearningStateRef.current.timeInPhase + 1
+          : 1
       };
+      
+      // Run Q-learning algorithm
+      if (isRunning) {
+        qLearningStateRef.current = qLearningController(qLearningStateRef.current);
+        
+        // Save Q-table periodically
+        if (Math.random() < 0.01) { // ~1% chance each update
+          saveQTable();
+        }
+      }
     }
-  }, [config.aiController]);
+  }, [simulationState, config.aiController, isRunning]);
   
   return (
     <div className="bg-card p-4 rounded-lg shadow-md">
