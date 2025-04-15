@@ -9,20 +9,43 @@ interface IntersectionProps {
 const Intersection: React.FC<IntersectionProps> = ({ trafficLights }) => {
   return (
     <div className="relative w-full h-full">
-      {/* Background */}
-      <div className="absolute inset-0 bg-grass" />
+      {/* Background with subtle texture */}
+      <div className="absolute inset-0 bg-grass bg-opacity-90 pattern-dots pattern-green-700 pattern-bg-transparent pattern-opacity-10 pattern-size-2" />
       
       {/* Horizontal Road */}
-      <div className="absolute left-0 right-0 top-1/2 h-[100px] bg-road transform -translate-y-1/2">
-        {/* Road Markings */}
+      <div className="absolute left-0 right-0 top-1/2 h-[100px] bg-road transform -translate-y-1/2 border-y border-roadMarking/30">
+        {/* Center Line */}
         <div className="absolute left-0 right-0 top-1/2 h-[2px] bg-roadMarking transform -translate-y-1/2 dashed-line" />
+        
+        {/* Stop Lines */}
+        <div className="absolute left-[240px] top-0 bottom-0 w-[8px] bg-roadMarking" />
+        <div className="absolute right-[240px] top-0 bottom-0 w-[8px] bg-roadMarking" />
+        
+        {/* Lane Markers */}
+        <div className="absolute left-[280px] top-[25px] h-[2px] w-[20px] bg-roadMarking" />
+        <div className="absolute left-[280px] top-[75px] h-[2px] w-[20px] bg-roadMarking" />
+        <div className="absolute right-[280px] top-[25px] h-[2px] w-[20px] bg-roadMarking" />
+        <div className="absolute right-[280px] top-[75px] h-[2px] w-[20px] bg-roadMarking" />
       </div>
       
       {/* Vertical Road */}
-      <div className="absolute top-0 bottom-0 left-1/2 w-[100px] bg-road transform -translate-x-1/2">
-        {/* Road Markings */}
+      <div className="absolute top-0 bottom-0 left-1/2 w-[100px] bg-road transform -translate-x-1/2 border-x border-roadMarking/30">
+        {/* Center Line */}
         <div className="absolute top-0 bottom-0 left-1/2 w-[2px] bg-roadMarking transform -translate-x-1/2 dashed-line" />
+        
+        {/* Stop Lines */}
+        <div className="absolute top-[140px] left-0 right-0 h-[8px] bg-roadMarking" />
+        <div className="absolute bottom-[140px] left-0 right-0 h-[8px] bg-roadMarking" />
+        
+        {/* Lane Markers */}
+        <div className="absolute left-[25px] top-[180px] w-[2px] h-[20px] bg-roadMarking" />
+        <div className="absolute left-[75px] top-[180px] w-[2px] h-[20px] bg-roadMarking" />
+        <div className="absolute left-[25px] bottom-[180px] w-[2px] h-[20px] bg-roadMarking" />
+        <div className="absolute left-[75px] bottom-[180px] w-[2px] h-[20px] bg-roadMarking" />
       </div>
+      
+      {/* Intersection Box */}
+      <div className="absolute left-1/2 top-1/2 w-[100px] h-[100px] transform -translate-x-1/2 -translate-y-1/2 border border-roadMarking/20" />
       
       {/* Traffic Lights */}
       {trafficLights.map(light => (
