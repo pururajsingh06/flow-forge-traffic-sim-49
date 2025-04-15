@@ -62,8 +62,8 @@ export class AdaptiveController implements TrafficController {
   private maxHistoryLength = 10;
   private currentDirection: 'ns' | 'ew' = 'ns';
   private switchTimer = 0;
-  private minGreenTime = 5; // Minimum green time in seconds
-  private lastSwitchTime = 0; // Track when we last switched directions
+  private minGreenTime = 3; // Reduced minimum green time for more responsiveness
+  private lastSwitchTime = 0;
   
   getName(): string {
     return "Adaptive Timing";
@@ -75,7 +75,7 @@ export class AdaptiveController implements TrafficController {
 
   update(state: SimulationState, deltaTime: number): SimulationState {
     const newState = { ...state };
-    const { greenDuration, yellowDuration, adaptiveThreshold } = state.config.aiParams;
+    const { yellowDuration } = state.config.aiParams;
     
     // Count vehicles in each direction
     const vehiclesByDirection: Record<Direction, number> = {
@@ -85,57 +85,16 @@ export class AdaptiveController implements TrafficController {
       west: 0
     };
     
-    // Track vehicles in each direction and their distance from intersection
-    const vehiclesApproaching: Record<'ns' | 'ew', { count: number, avgDistance: number }> = {
-      ns: { count: 0, avgDistance: 0 },
-      ew: { count: 0, avgDistance: 0 }
-    };
-    
-    // Center of intersection
-    const centerX = 300;
-    const centerY = 200;
-    let totalNSDistance = 0;
-    let totalEWDistance = 0;
-    
+    // Count vehicles in each direction
     state.vehicles.forEach(vehicle => {
       vehiclesByDirection[vehicle.direction]++;
-      
-      // Calculate distance from intersection
-      const distance = Math.sqrt(
-        Math.pow(vehicle.position.x - centerX, 2) + 
-        Math.pow(vehicle.position.y - centerY, 2)
-      );
-      
-      // Determine if vehicle is approaching (not leaving) the intersection
-      const isApproaching = 
-        (vehicle.direction === 'north' && vehicle.position.y > centerY) ||
-        (vehicle.direction === 'south' && vehicle.position.y < centerY) ||
-        (vehicle.direction === 'east' && vehicle.position.x < centerX) ||
-        (vehicle.direction === 'west' && vehicle.position.x > centerX);
-      
-      if (isApproaching) {
-        if (vehicle.direction === 'north' || vehicle.direction === 'south') {
-          vehiclesApproaching.ns.count++;
-          totalNSDistance += distance;
-        } else {
-          vehiclesApproaching.ew.count++;
-          totalEWDistance += distance;
-        }
-      }
     });
     
-    // Calculate average distances
-    if (vehiclesApproaching.ns.count > 0) {
-      vehiclesApproaching.ns.avgDistance = totalNSDistance / vehiclesApproaching.ns.count;
-    }
-    if (vehiclesApproaching.ew.count > 0) {
-      vehiclesApproaching.ew.avgDistance = totalEWDistance / vehiclesApproaching.ew.count;
-    }
-    
-    // Add current counts to history
+    // Get totals by axis
     const northSouthCount = vehiclesByDirection.north + vehiclesByDirection.south;
     const eastWestCount = vehiclesByDirection.east + vehiclesByDirection.west;
     
+    // Add current counts to history
     this.trafficHistory.ns.push(northSouthCount);
     this.trafficHistory.ew.push(eastWestCount);
     
@@ -147,63 +106,59 @@ export class AdaptiveController implements TrafficController {
       this.trafficHistory.ew.shift();
     }
     
-    // Calculate average traffic over recent history
-    const avgNS = this.trafficHistory.ns.reduce((sum, count) => sum + count, 0) / this.trafficHistory.ns.length;
-    const avgEW = this.trafficHistory.ew.reduce((sum, count) => sum + count, 0) / this.trafficHistory.ew.length;
+    // Calculate average traffic over recent history (weighted toward most recent)
+    const recentWeight = 1.5; // Give more weight to recent counts
+    let weightedNS = 0;
+    let weightedEW = 0;
+    let totalWeight = 0;
+    
+    for (let i = 0; i < this.trafficHistory.ns.length; i++) {
+      const weight = i === this.trafficHistory.ns.length - 1 ? recentWeight : 1;
+      weightedNS += this.trafficHistory.ns[i] * weight;
+      weightedEW += this.trafficHistory.ew[i] * weight;
+      totalWeight += weight;
+    }
+    
+    const avgNS = weightedNS / totalWeight;
+    const avgEW = weightedEW / totalWeight;
     
     // Update switch timer
     this.switchTimer += deltaTime;
     this.lastSwitchTime += deltaTime;
     
-    // IMPROVED LOGIC: More heavily weight current vehicle counts rather than just averages
-    // This ensures we respond better to sudden influxes of vehicles
+    // Determine if we need to switch directions based on traffic count
+    // SIMPLIFIED LOGIC: Direct comparison of vehicle counts with a small buffer
+    // to prevent rapid switching
+    const nsGreaterThanEw = avgNS > (avgEW + 1); // Buffer of 1 vehicle
+    const ewGreaterThanNs = avgEW > (avgNS + 1); // Buffer of 1 vehicle
     
-    // Calculate the congestion ratio between directions
-    let nsToEwRatio = 1;
-    if (vehiclesApproaching.ew.count > 0) {
-      nsToEwRatio = vehiclesApproaching.ns.count / vehiclesApproaching.ew.count;
-    } else if (vehiclesApproaching.ns.count > 0) {
-      nsToEwRatio = 5; // Strongly favor NS if there are no EW vehicles
+    // Determine current phase
+    const nsGreen = state.trafficLights.some(light => 
+      ['north', 'south'].includes(light.direction) && light.state === 'green'
+    );
+    const ewGreen = state.trafficLights.some(light => 
+      ['east', 'west'].includes(light.direction) && light.state === 'green'
+    );
+    
+    let shouldSwitchToNS = false;
+    let shouldSwitchToEW = false;
+    
+    // Logic for when to switch directions
+    if (nsGreen && ewGreaterThanNs && this.switchTimer >= this.minGreenTime) {
+      shouldSwitchToEW = true;
+    } else if (ewGreen && nsGreaterThanEw && this.switchTimer >= this.minGreenTime) {
+      shouldSwitchToNS = true;
     }
     
-    let ewToNsRatio = 1;
-    if (vehiclesApproaching.ns.count > 0) {
-      ewToNsRatio = vehiclesApproaching.ew.count / vehiclesApproaching.ns.count;
-    } else if (vehiclesApproaching.ew.count > 0) {
-      ewToNsRatio = 5; // Strongly favor EW if there are no NS vehicles
+    // Force switch if one direction has had a very long wait and has traffic
+    const maxWaitTime = 20; // Maximum time any direction should wait
+    if (ewGreen && this.lastSwitchTime > maxWaitTime && northSouthCount > 0) {
+      shouldSwitchToNS = true;
+    } else if (nsGreen && this.lastSwitchTime > maxWaitTime && eastWestCount > 0) {
+      shouldSwitchToEW = true;
     }
     
-    // Determine which direction has more traffic right now
-    const moreTrafficInNorthSouth = nsToEwRatio > adaptiveThreshold;
-    const moreTrafficInEastWest = ewToNsRatio > adaptiveThreshold;
-    
-    // Determine if traffic is building up significantly in the non-green direction
-    const isTrafficBuildingUp = 
-      (this.currentDirection === 'ns' && vehiclesApproaching.ew.count > 3 && this.lastSwitchTime > 15) ||
-      (this.currentDirection === 'ew' && vehiclesApproaching.ns.count > 3 && this.lastSwitchTime > 15);
-    
-    // Check if we need to switch direction based on traffic conditions
-    if ((this.currentDirection === 'ns' && moreTrafficInEastWest && this.switchTimer >= this.minGreenTime) ||
-        (this.currentDirection === 'ew' && moreTrafficInNorthSouth && this.switchTimer >= this.minGreenTime) ||
-        isTrafficBuildingUp) {
-      // Switch direction
-      this.currentDirection = this.currentDirection === 'ns' ? 'ew' : 'ns';
-      this.switchTimer = 0;
-      this.lastSwitchTime = 0;
-    }
-    
-    // Calculate dynamic green duration based on traffic volume
-    let dynamicGreenDuration = greenDuration;
-    
-    if (this.currentDirection === 'ns' && vehiclesApproaching.ns.count > 0) {
-      // Scale green duration by the ratio of vehicles + a base time
-      // Higher vehicle counts = longer green durations
-      dynamicGreenDuration = Math.min(60, greenDuration * Math.max(1, 0.5 + (vehiclesApproaching.ns.count / 5)));
-    } else if (this.currentDirection === 'ew' && vehiclesApproaching.ew.count > 0) {
-      dynamicGreenDuration = Math.min(60, greenDuration * Math.max(1, 0.5 + (vehiclesApproaching.ew.count / 5)));
-    }
-    
-    // Update traffic lights based on current direction and traffic conditions
+    // Update traffic lights based on vehicle counts
     newState.trafficLights = state.trafficLights.map(light => {
       const newLight = { ...light };
       newLight.timer += deltaTime;
@@ -211,35 +166,71 @@ export class AdaptiveController implements TrafficController {
       const isNorthSouth = ['north', 'south'].includes(light.direction);
       const isEastWest = ['east', 'west'].includes(light.direction);
       
-      // Determine if this light should be green based on current direction
-      const shouldBeGreen = 
-        (this.currentDirection === 'ns' && isNorthSouth) ||
-        (this.currentDirection === 'ew' && isEastWest);
-      
-      // State machine for light transitions
-      if (shouldBeGreen) {
-        if (newLight.state === 'red') {
+      // Process NS lights
+      if (isNorthSouth) {
+        if (shouldSwitchToEW && newLight.state === 'green') {
+          // Switch from green to yellow
+          newLight.state = 'yellow';
+          newLight.timer = 0;
+          this.switchTimer = 0;
+        } else if (newLight.state === 'yellow' && newLight.timer >= yellowDuration) {
+          // Switch from yellow to red
+          newLight.state = 'red';
+          newLight.timer = 0;
+        } else if (shouldSwitchToNS && newLight.state === 'red') {
+          // Switch from red to green
           newLight.state = 'green';
           newLight.timer = 0;
-        } else if (newLight.state === 'green' && newLight.timer >= dynamicGreenDuration) {
-          newLight.state = 'yellow';
-          newLight.timer = 0;
-        } else if (newLight.state === 'yellow' && newLight.timer >= yellowDuration) {
-          newLight.state = 'red';
-          newLight.timer = 0;
+          this.lastSwitchTime = 0;
+          this.switchTimer = 0;
         }
-      } else {
-        if (newLight.state === 'green') {
+      }
+      
+      // Process EW lights
+      if (isEastWest) {
+        if (shouldSwitchToNS && newLight.state === 'green') {
+          // Switch from green to yellow
           newLight.state = 'yellow';
           newLight.timer = 0;
+          this.switchTimer = 0;
         } else if (newLight.state === 'yellow' && newLight.timer >= yellowDuration) {
+          // Switch from red to green
           newLight.state = 'red';
           newLight.timer = 0;
+        } else if (shouldSwitchToEW && newLight.state === 'red') {
+          // Switch from red to green
+          newLight.state = 'green';
+          newLight.timer = 0;
+          this.lastSwitchTime = 0;
+          this.switchTimer = 0;
         }
       }
       
       return newLight;
     });
+    
+    // Make sure there's always at least one direction with green lights
+    const anyGreen = newState.trafficLights.some(light => light.state === 'green');
+    
+    if (!anyGreen) {
+      // If no lights are green, set the direction with more traffic to green
+      const directionToGreen = avgNS >= avgEW ? 'ns' : 'ew';
+      
+      newState.trafficLights = newState.trafficLights.map(light => {
+        const isNorthSouth = ['north', 'south'].includes(light.direction);
+        const isEastWest = ['east', 'west'].includes(light.direction);
+        
+        if ((directionToGreen === 'ns' && isNorthSouth) || 
+            (directionToGreen === 'ew' && isEastWest)) {
+          return { ...light, state: 'green', timer: 0 };
+        }
+        return light;
+      });
+      
+      this.lastSwitchTime = 0;
+      this.switchTimer = 0;
+      this.currentDirection = directionToGreen;
+    }
     
     return newState;
   }
