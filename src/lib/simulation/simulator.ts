@@ -596,26 +596,26 @@ function spawnVehicles(state: SimulationState, deltaTime: number): SimulationSta
   switch (direction) {
     case 'north':
       position = { 
-        x: lane === 'left' ? 290 : 310, 
+        x: lane === 'left' ? 280 : 300, 
         y: 400 
       };
       break;
     case 'south':
       position = { 
-        x: lane === 'left' ? 330 : 350, 
+        x: lane === 'left' ? 320 : 340, 
         y: 0 
       };
       break;
     case 'east':
       position = { 
         x: 0, 
-        y: lane === 'left' ? 210 : 230
+        y: lane === 'left' ? 180 : 200
       };
       break;
     case 'west':
       position = { 
         x: 600, 
-        y: lane === 'left' ? 170 : 190
+        y: lane === 'left' ? 200 : 220
       };
       break;
     default:

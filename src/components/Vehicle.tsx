@@ -29,17 +29,34 @@ const Vehicle: React.FC<VehicleProps> = ({ vehicle }) => {
   // Define vehicle size (in px)
   const size = type === 'car' ? 16 : 24;
 
-  // Optional lane offset in pixels (can be tuned down for more realism)
-  const laneOffset = 5;
+  // Define lane offsets based on direction to ensure vehicles stay on the road
+  // These values are adjusted to keep the vehicles aligned with the road
+  let laneOffset = 0;
+  let roadCenter = { x: 300, y: 200 }; // Center of the intersection
+  
+  switch (direction) {
+    case 'north':
+      laneOffset = lane === 'left' ? -20 : 0;
+      break;
+    case 'south':
+      laneOffset = lane === 'left' ? 0 : 20;
+      break;
+    case 'east':
+      laneOffset = lane === 'left' ? 0 : 20;
+      break;
+    case 'west':
+      laneOffset = lane === 'left' ? -20 : 0;
+      break;
+  }
 
-  // Compute adjusted position
+  // Compute adjusted position with lane offset
   let offsetX = -size / 2;
   let offsetY = -size / 2;
 
   if (direction === 'north' || direction === 'south') {
-    offsetX += lane === 'left' ? -laneOffset : lane === 'right' ? laneOffset : 0;
+    offsetX += laneOffset;
   } else {
-    offsetY += lane === 'left' ? -laneOffset : lane === 'right' ? laneOffset : 0;
+    offsetY += laneOffset;
   }
 
   const left = position.x + offsetX;
