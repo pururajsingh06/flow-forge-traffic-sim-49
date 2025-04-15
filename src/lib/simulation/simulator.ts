@@ -58,12 +58,18 @@ export class FixedTimingController implements TrafficController {
 
 // Adaptive controller (responds to traffic volume)
 export class AdaptiveController implements TrafficController {
+  private trafficHistory: { ns: number[], ew: number[] } = { ns: [], ew: [] };
+  private maxHistoryLength = 10;
+  private currentDirection: 'ns' | 'ew' = 'ns';
+  private switchTimer = 0;
+  private minGreenTime = 5; // Minimum green time in seconds
+  
   getName(): string {
     return "Adaptive Timing";
   }
   
   getDescription(): string {
-    return "Adjusts light timing based on current traffic volume in each direction.";
+    return "Intelligently adjusts light timing based on real-time traffic conditions.";
   }
 
   update(state: SimulationState, deltaTime: number): SimulationState {
@@ -78,84 +84,143 @@ export class AdaptiveController implements TrafficController {
       west: 0
     };
     
+    // Count vehicles in each direction and track their distance from intersection
+    const vehiclesApproaching: Record<'ns' | 'ew', { count: number, avgDistance: number }> = {
+      ns: { count: 0, avgDistance: 0 },
+      ew: { count: 0, avgDistance: 0 }
+    };
+    
+    // Center of intersection
+    const centerX = 300;
+    const centerY = 200;
+    let totalNSDistance = 0;
+    let totalEWDistance = 0;
+    
     state.vehicles.forEach(vehicle => {
       vehiclesByDirection[vehicle.direction]++;
+      
+      // Calculate distance from intersection
+      const distance = Math.sqrt(
+        Math.pow(vehicle.position.x - centerX, 2) + 
+        Math.pow(vehicle.position.y - centerY, 2)
+      );
+      
+      // Determine if vehicle is approaching (not leaving) the intersection
+      const isApproaching = 
+        (vehicle.direction === 'north' && vehicle.position.y > centerY) ||
+        (vehicle.direction === 'south' && vehicle.position.y < centerY) ||
+        (vehicle.direction === 'east' && vehicle.position.x < centerX) ||
+        (vehicle.direction === 'west' && vehicle.position.x > centerX);
+      
+      if (isApproaching) {
+        if (vehicle.direction === 'north' || vehicle.direction === 'south') {
+          vehiclesApproaching.ns.count++;
+          totalNSDistance += distance;
+        } else {
+          vehiclesApproaching.ew.count++;
+          totalEWDistance += distance;
+        }
+      }
     });
     
+    // Calculate average distances
+    if (vehiclesApproaching.ns.count > 0) {
+      vehiclesApproaching.ns.avgDistance = totalNSDistance / vehiclesApproaching.ns.count;
+    }
+    if (vehiclesApproaching.ew.count > 0) {
+      vehiclesApproaching.ew.avgDistance = totalEWDistance / vehiclesApproaching.ew.count;
+    }
+    
+    // Add current counts to history
     const northSouthCount = vehiclesByDirection.north + vehiclesByDirection.south;
     const eastWestCount = vehiclesByDirection.east + vehiclesByDirection.west;
     
-    // Determine which direction has more traffic
-    const moreTrafficInNorthSouth = northSouthCount > eastWestCount * adaptiveThreshold;
-    const moreTrafficInEastWest = eastWestCount > northSouthCount * adaptiveThreshold;
+    this.trafficHistory.ns.push(northSouthCount);
+    this.trafficHistory.ew.push(eastWestCount);
     
+    // Keep history at max length
+    if (this.trafficHistory.ns.length > this.maxHistoryLength) {
+      this.trafficHistory.ns.shift();
+    }
+    if (this.trafficHistory.ew.length > this.maxHistoryLength) {
+      this.trafficHistory.ew.shift();
+    }
+    
+    // Calculate average traffic over recent history
+    const avgNS = this.trafficHistory.ns.reduce((sum, count) => sum + count, 0) / this.trafficHistory.ns.length;
+    const avgEW = this.trafficHistory.ew.reduce((sum, count) => sum + count, 0) / this.trafficHistory.ew.length;
+    
+    // Determine traffic demand ratio (how much more traffic in one direction vs the other)
+    const trafficRatio = avgNS > 0 && avgEW > 0 
+      ? Math.max(avgNS / avgEW, avgEW / avgNS) 
+      : 1;
+    
+    // Higher ratio means more traffic imbalance, so adjust the threshold accordingly
+    const dynamicThreshold = Math.min(adaptiveThreshold * trafficRatio, 3.0);
+    
+    // Determine which direction has more immediate traffic
+    const moreTrafficInNorthSouth = 
+      vehiclesApproaching.ns.count > vehiclesApproaching.ew.count * dynamicThreshold ||
+      (vehiclesApproaching.ns.count > 0 && vehiclesApproaching.ew.count === 0);
+      
+    const moreTrafficInEastWest = 
+      vehiclesApproaching.ew.count > vehiclesApproaching.ns.count * dynamicThreshold ||
+      (vehiclesApproaching.ew.count > 0 && vehiclesApproaching.ns.count === 0);
+    
+    // Update switch timer
+    this.switchTimer += deltaTime;
+    
+    // Check if we need to switch direction based on traffic conditions
+    if ((this.currentDirection === 'ns' && moreTrafficInEastWest && this.switchTimer >= this.minGreenTime) ||
+        (this.currentDirection === 'ew' && moreTrafficInNorthSouth && this.switchTimer >= this.minGreenTime)) {
+      // Switch direction
+      this.currentDirection = this.currentDirection === 'ns' ? 'ew' : 'ns';
+      this.switchTimer = 0;
+    }
+    
+    // Update traffic lights based on current direction and traffic conditions
     newState.trafficLights = state.trafficLights.map(light => {
       const newLight = { ...light };
       newLight.timer += deltaTime;
       
-      if (['north', 'south'].includes(light.direction)) {
-        if (moreTrafficInNorthSouth) {
-          // Extend green time for north-south
-          if (newLight.state === 'green') {
-            // Keep green longer
-            if (newLight.timer % (greenDuration * 1.5) < greenDuration * 1.5) {
-              newLight.state = 'green';
-            } else {
-              newLight.state = 'yellow';
-              newLight.timer = 0;
-            }
-          } else if (newLight.state === 'yellow') {
-            if (newLight.timer >= yellowDuration) {
-              newLight.state = 'red';
-              newLight.timer = 0;
-            }
-          } else if (newLight.state === 'red') {
-            if (newLight.timer >= greenDuration * 0.8) {
-              newLight.state = 'green';
-              newLight.timer = 0;
-            }
-          }
-        } else {
-          // Normal timing
-          if (newLight.timer % (greenDuration + yellowDuration + greenDuration) < greenDuration) {
-            newLight.state = 'green';
-          } else if (newLight.timer % (greenDuration + yellowDuration + greenDuration) < greenDuration + yellowDuration) {
-            newLight.state = 'yellow';
-          } else {
-            newLight.state = 'red';
-          }
+      const isNorthSouth = ['north', 'south'].includes(light.direction);
+      const isEastWest = ['east', 'west'].includes(light.direction);
+      
+      // Determine if this light should be green based on current direction
+      const shouldBeGreen = 
+        (this.currentDirection === 'ns' && isNorthSouth) ||
+        (this.currentDirection === 'ew' && isEastWest);
+      
+      // Calculate dynamic green duration based on traffic volume
+      let dynamicGreenDuration = greenDuration;
+      if (shouldBeGreen) {
+        if (this.currentDirection === 'ns' && moreTrafficInNorthSouth) {
+          // Extend green time proportionally to traffic ratio, up to 2x
+          dynamicGreenDuration = greenDuration * Math.min(1.5, trafficRatio);
+        } else if (this.currentDirection === 'ew' && moreTrafficInEastWest) {
+          dynamicGreenDuration = greenDuration * Math.min(1.5, trafficRatio);
+        }
+      }
+      
+      // State machine for light transitions
+      if (shouldBeGreen) {
+        if (newLight.state === 'red') {
+          newLight.state = 'green';
+          newLight.timer = 0;
+        } else if (newLight.state === 'green' && newLight.timer >= dynamicGreenDuration) {
+          newLight.state = 'yellow';
+          newLight.timer = 0;
+        } else if (newLight.state === 'yellow' && newLight.timer >= yellowDuration) {
+          newLight.state = 'red';
+          newLight.timer = 0;
         }
       } else {
-        if (moreTrafficInEastWest) {
-          // Extend green time for east-west
-          if (newLight.state === 'green') {
-            // Keep green longer
-            if (newLight.timer % (greenDuration * 1.5) < greenDuration * 1.5) {
-              newLight.state = 'green';
-            } else {
-              newLight.state = 'yellow';
-              newLight.timer = 0;
-            }
-          } else if (newLight.state === 'yellow') {
-            if (newLight.timer >= yellowDuration) {
-              newLight.state = 'red';
-              newLight.timer = 0;
-            }
-          } else if (newLight.state === 'red') {
-            if (newLight.timer >= greenDuration * 0.8) {
-              newLight.state = 'green';
-              newLight.timer = 0;
-            }
-          }
-        } else {
-          // Normal timing with offset
-          if (newLight.timer % (greenDuration + yellowDuration + greenDuration) < greenDuration) {
-            newLight.state = 'red';
-          } else if (newLight.timer % (greenDuration + yellowDuration + greenDuration) < greenDuration + yellowDuration) {
-            newLight.state = 'red';
-          } else {
-            newLight.state = 'green';
-          }
+        if (newLight.state === 'green') {
+          newLight.state = 'yellow';
+          newLight.timer = 0;
+        } else if (newLight.state === 'yellow' && newLight.timer >= yellowDuration) {
+          newLight.state = 'red';
+          newLight.timer = 0;
         }
       }
       
